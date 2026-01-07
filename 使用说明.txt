@@ -1,0 +1,111 @@
+DataGrip JSON 高亮插件 - 使用说明
+=====================================
+
+一、构建插件
+-----------
+
+方法一：使用 Makefile（推荐）
+---------------------------
+项目已包含 Makefile，可以使用以下命令：
+
+1. 查看所有可用命令：
+   make help
+
+2. 构建插件：
+   make build
+   或
+   make dist    # 构建并显示详细信息
+
+3. 清理构建文件：
+   make clean
+
+4. 清理后重新构建：
+   make clean-build
+
+5. 安装插件到 DataGrip（可选）：
+   # macOS
+   export DATAGRIP_PLUGINS_DIR=~/Library/Application\ Support/JetBrains/DataGrip2025.3/plugins
+   make install
+   
+   # Linux
+   export DATAGRIP_PLUGINS_DIR=~/.local/share/JetBrains/DataGrip2025.3/plugins
+   make install
+
+6. 运行插件进行测试：
+   make run    # 启动沙盒 DataGrip 实例
+
+
+方法二：使用 Gradle 命令
+------------------------
+1. 确保已安装 JDK 17 或更高版本
+
+2. 配置 DataGrip SDK（二选一）：
+   
+   方式一（推荐）：使用本地 DataGrip 安装
+   - 编辑 build.gradle.kts 文件
+   - 找到 intellij 配置块
+   - 取消 localPath.set() 的注释，并设置你的 DataGrip 安装路径：
+     * macOS: localPath.set("/Applications/DataGrip.app")
+     * Windows: localPath.set("C:\\Program Files\\JetBrains\\DataGrip 2023.3")
+     * Linux: localPath.set("/opt/datagrip")
+   - 注释掉 version.set() 和 type.set() 行
+   
+   方式二：使用 IntelliJ IDEA Ultimate
+   - 保持 build.gradle.kts 中的默认配置（使用 IU 类型）
+   - 构建时会自动下载 IntelliJ IDEA Ultimate（包含数据库插件）
+
+3. 在项目根目录执行以下命令：
+
+   Windows:
+   gradlew.bat buildPlugin
+
+   macOS/Linux:
+   ./gradlew buildPlugin
+
+4. 构建完成后，插件 ZIP 文件位于：
+   build/distributions/show-as-json-plugin-1.0.0.zip
+
+注意：如果遇到编译错误，请确保：
+- 已正确配置 DataGrip SDK 路径
+- JDK 版本为 17 或更高
+- 网络连接正常（如果使用方式二，需要下载 IDE）
+
+二、安装插件
+-----------
+1. 打开 DataGrip
+2. 进入 Settings/Preferences → Plugins
+3. 点击右上角的齿轮图标 → Install Plugin from Disk...
+4. 选择构建生成的 ZIP 文件
+5. 重启 DataGrip
+
+三、使用方法
+-----------
+1. 在 DataGrip 中执行一个返回 JSON 数据的查询
+2. 在查询结果表格中，选中一个包含 JSON 的单元格
+3. 有两种方式触发插件：
+   - 右键点击单元格，选择 "Show as JSON"
+   - 使用快捷键：F7
+4. 插件会在对话框中打开值编辑器，显示 JSON 内容并应用语法高亮
+
+四、开发调试
+-----------
+1. 在 IntelliJ IDEA 中打开项目
+2. 运行 → Edit Configurations...
+3. 添加 Plugin 配置
+4. 设置 Plugin 为当前项目
+5. 运行配置，会自动启动一个沙盒 DataGrip 实例用于测试
+
+五、常见问题
+-----------
+1. 插件无法加载：
+   - 检查 plugin.xml 语法是否正确
+   - 查看 DataGrip 日志文件（Help → Show Log）
+
+2. 菜单项不显示：
+   - 确保在查询结果表格的上下文中
+   - 确认已选中一个单元格
+
+3. 快捷键冲突：
+   - 在 DataGrip 设置中检查快捷键冲突
+   - 可以修改 plugin.xml 中的快捷键配置
+

@@ -1,0 +1,43 @@
+<idea-plugin>
+    <id>com.github.cyrnicolase.show-as-json</id>
+    <name>Show as JSON</name>
+    <version>1.0.10</version>
+    <vendor email="" url="https://github.com/cyrnicolase">cyrnicolase</vendor>
+
+    <description><![CDATA[
+    在 DataGrip 查询结果中，将选中的单元格内容在值编辑器中以 JSON 格式打开并高亮显示。
+
+    功能：
+    - 快捷键：在查询结果表格中选中单元格后按 F7
+    - 自动在值编辑器中打开单元格内容并设置 JSON 语法高亮
+    ]]></description>
+
+    <change-notes><![CDATA[
+    <h3>1.0.10</h3>
+    <ul>
+        <li>初始版本</li>
+        <li>支持在值编辑器中以 JSON 格式显示单元格内容</li>
+        <li>支持右键菜单和快捷键触发</li>
+    </ul>
+    ]]></change-notes>
+
+    <!-- 兼容的 DataGrip 版本 -->
+    <idea-version since-build="231" until-build="254.*"/>
+
+    <!-- 依赖 DataGrip 数据库功能 -->
+    <depends>com.intellij.modules.platform</depends>
+    <depends>com.intellij.database</depends>
+
+    <actions>
+        <!-- 注册 Action -->
+        <action id="ShowAsJsonAction"
+                class="com.github.cyrnicolase.showasjson.ShowAsJsonAction"
+                text="Show as JSON"
+                description="在值编辑器中以 JSON 格式打开选中的单元格内容">
+            <!-- 注册键盘快捷键 -->
+            <keyboard-shortcut keymap="$default" first-keystroke="F7"/>
+            <keyboard-shortcut keymap="Mac OS X" first-keystroke="F7"/>
+        </action>
+    </actions>
+</idea-plugin>
+

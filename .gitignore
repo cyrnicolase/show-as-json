@@ -1,0 +1,53 @@
+# Gradle
+.gradle/
+build/
+out/
+# 保留 Gradle Wrapper 文件（需要提交到版本控制）
+!gradle/wrapper/gradle-wrapper.jar
+!gradle/wrapper/gradle-wrapper.properties
+
+# IntelliJ IDEA
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# 插件构建输出
+*.zip
+*.jar
+!gradle/wrapper/gradle-wrapper.jar
+
+# 日志文件
+*.log
+*.log.*
+
+# 临时文件
+*.tmp
+*.temp
+*.swp
+*.swo
+*~
+
+# IDE 特定文件
+.vscode/
+*.code-workspace
+
+# 测试和覆盖率报告
+coverage/
+.nyc_output/
+
+# macOS 系统文件
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Windows 系统文件
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Linux 系统文件
+.directory
+.Trash-*
+
