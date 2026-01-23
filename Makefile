@@ -2,7 +2,7 @@
 
 # 项目配置
 PLUGIN_NAME := show-as-json-plugin
-VERSION := 1.0.10
+VERSION := 1.0.11
 BUILD_DIR := build
 DIST_DIR := $(BUILD_DIR)/distributions
 PLUGIN_ZIP := $(DIST_DIR)/$(PLUGIN_NAME)-$(VERSION).zip

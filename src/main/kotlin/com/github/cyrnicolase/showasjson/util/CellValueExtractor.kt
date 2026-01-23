@@ -100,9 +100,10 @@ object CellValueExtractor {
                         val value = dataContext.getData(key as com.intellij.openapi.actionSystem.DataKey<*>)
                         value?.let {
                             val valueClass = it.javaClass.name
-                            if (valueClass.contains("ResultSet") || 
+                            if (valueClass.contains("ResultSet") ||
                                 valueClass.contains("Database") ||
-                                valueClass.contains("Table")) {
+                                valueClass.contains("Table")
+                            ) {
                                 return extractValueFromViewer(it)
                             }
                         }
@@ -243,13 +244,14 @@ object CellValueExtractor {
     private fun getSelectedCellValue(table: JTable): String? {
         val selectedRow = table.selectedRow
         val selectedColumn = table.selectedColumn
-        
+
         // 检查行和列是否有效
-        if (selectedRow < 0 || selectedColumn < 0 || 
-            selectedRow >= table.rowCount || selectedColumn >= table.columnCount) {
+        if (selectedRow < 0 || selectedColumn < 0 ||
+            selectedRow >= table.rowCount || selectedColumn >= table.columnCount
+        ) {
             return null
         }
-        
+
         return try {
             table.getValueAt(selectedRow, selectedColumn)?.toString()
         } catch (e: Exception) {

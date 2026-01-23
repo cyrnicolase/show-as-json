@@ -178,18 +178,23 @@ object JsonEditorDialog {
     private fun createEditorInstance(project: Project, document: Document, psiFile: PsiFile): Editor {
         val jsonFileType = FileTypeManager.getInstance().getFileTypeByExtension("json")
         val editorFactory = EditorFactory.getInstance()
-        
-        return psiFile.virtualFile?.let {
+
+        // 优先尝试使用 VirtualFile 创建编辑器
+        psiFile.virtualFile?.let { virtualFile ->
             try {
-                editorFactory.createEditor(document, project, it, false)
+                return editorFactory.createEditor(document, project, virtualFile, false)
             } catch (e: Exception) {
-                null
+                // 如果失败，继续尝试其他方法
             }
-        } ?: try {
-            editorFactory.createEditor(document, project, jsonFileType, false)
+        }
+
+        // 尝试使用文件类型创建编辑器
+        try {
+            return editorFactory.createEditor(document, project, jsonFileType, false)
         } catch (e: Exception) {
+            // 最后尝试创建通用编辑器
             try {
-                editorFactory.createEditor(document, project)
+                return editorFactory.createEditor(document, project)
             } catch (e2: Exception) {
                 throw IllegalStateException("无法创建编辑器：${e2.message}", e2)
             }
@@ -254,5 +259,41 @@ object JsonEditorDialog {
         }
     }
 
+    /**
+     * 检查对话框是否打开且可见
+     *
+     * @return 如果对话框存在且可见返回 true，否则返回 false
+     */
+    fun isDialogOpen(): Boolean {
+        synchronized(lock) {
+            val dialog = dialogInstance
+            return dialog != null && dialog.isVisible
+        }
+    }
+
+    /**
+     * 关闭当前打开的对话框
+     *
+     * 如果对话框存在且可见，则关闭它并释放相关资源。
+     */
+    fun closeDialog() {
+        synchronized(lock) {
+            val dialog = dialogInstance
+            if (dialog != null && dialog.isVisible) {
+                // 释放编辑器资源
+                disposeEditor()
+
+                // 关闭对话框
+                try {
+                    dialog.dispose()
+                } catch (e: Exception) {
+                    // 如果对话框已被释放，忽略错误
+                }
+
+                // 清空引用
+                dialogInstance = null
+            }
+        }
+    }
 }
 

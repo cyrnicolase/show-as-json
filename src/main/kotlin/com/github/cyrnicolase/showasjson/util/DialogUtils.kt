@@ -41,7 +41,7 @@ internal object DialogUtils {
     fun createDialog(project: Project, title: String, onClose: () -> Unit): JDialog {
         val ownerFrame = WindowManager.getInstance().getFrame(project) as? Frame
         val dialog = JDialog(ownerFrame, title, false)
-        
+
         dialog.setSize(DIALOG_WIDTH, DIALOG_HEIGHT)
         dialog.setLocationRelativeTo(ownerFrame)
         dialog.defaultCloseOperation = WindowConstants.DISPOSE_ON_CLOSE

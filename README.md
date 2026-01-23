@@ -1,6 +1,6 @@
 # Show as JSON Plugin for DataGrip
 
-[![Version](https://img.shields.io/badge/version-1.0.10-blue.svg)](https://github.com/cyrnicolase/show-as-json-plugin)
+[![Version](https://img.shields.io/badge/version-1.0.11-blue.svg)](https://github.com/cyrnicolase/show-as-json-plugin)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![DataGrip](https://img.shields.io/badge/DataGrip-231%2B-orange.svg)](https://www.jetbrains.com/datagrip/)
 
@@ -13,8 +13,9 @@
 - 📝 **自动格式化**：自动将压缩的 JSON 字符串格式化为可读的多行格式
 - 🔄 **单例模式**：全局只有一个编辑器实例，切换单元格时自动更新内容
 - 📏 **字体同步**：JSON 编辑器字体大小与查询结果表格保持一致
-- ⌨️ **快捷键支持**：支持 `F7` 快捷键快速触发
+- ⌨️ **快捷键支持**：支持 `F7` 快捷键快速触发和关闭面板
 - 🎯 **只读模式**：编辑器为只读模式，防止误操作
+- 🔁 **Toggle 功能**：未选择单元格时按 `F7` 可关闭已打开的 JSON 面板
 
 ## 系统要求
 
@@ -58,10 +59,13 @@ make build
 
 ### 快捷键
 
-- **F7**: 打开/更新 JSON 编辑器对话框
+- **F7**: 
+  - 当选择输出单元格时：打开/更新 JSON 编辑器对话框
+  - 当未选择输出单元格时：如果面板已打开，则关闭面板；如果面板未打开，则无操作
 
 ### 对话框操作
 
+- **F7**: 未选择单元格时，可关闭已打开的 JSON 面板
 - **ESC**: 关闭对话框
 - **滚动**: 支持正常的滚动速度，方便查看长 JSON 内容
 
@@ -179,7 +183,8 @@ A: 如果 JSON 格式错误，插件会显示原始内容。请检查：
 A: 可以：
 1. 点击对话框的关闭按钮
 2. 按 `ESC` 键
-3. 关闭 DataGrip 窗口
+3. 未选择单元格时按 `F7` 键（如果面板已打开）
+4. 关闭 DataGrip 窗口
 
 ### Q: 支持哪些 DataGrip 版本？
 
@@ -206,6 +211,12 @@ A: 支持 DataGrip 231 到 254.* 版本。
 - GitHub: [@cyrnicolase](https://github.com/cyrnicolase)
 
 ## 更新日志
+
+### 1.0.11
+
+- ✅ 新增 F7 快捷键 toggle 功能：未选择单元格时按 F7 可关闭已打开的 show as json 面板
+- ✅ 优化代码结构，移除未使用的代码
+- ✅ 改进代码格式和可读性
 
 ### 1.0.10
 

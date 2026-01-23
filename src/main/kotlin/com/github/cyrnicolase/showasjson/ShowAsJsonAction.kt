@@ -19,7 +19,10 @@ import java.awt.Frame
 class ShowAsJsonAction : AnAction() {
 
     /**
-     * 执行操作：提取单元格值并显示在 JSON 编辑器中
+     * 执行操作：提取单元格值并显示在 JSON 编辑器中，或切换面板状态
+     *
+     * 如果选择了输出单元格，则打开/更新 show as json 面板。
+     * 如果未选择输出单元格，则检查是否有打开的 show as json 面板，如果有则关闭，如果没有则无事件。
      *
      * @param e Action 事件，包含项目上下文和数据上下文
      */
@@ -34,9 +37,14 @@ class ShowAsJsonAction : AnAction() {
         val tableFont = CellValueExtractor.extractTableFont(dataContext)
 
         if (cellValue != null) {
+            // 有选择输出单元格：打开/更新面板
             JsonEditorDialog.show(project, cellValue, tableFont)
         } else {
-            showErrorMessage(project)
+            // 没有选择输出单元格：检查并关闭已打开的面板
+            if (JsonEditorDialog.isDialogOpen()) {
+                JsonEditorDialog.closeDialog()
+            }
+            // 如果没有打开的面板，则无事件（不显示错误消息）
         }
     }
 
@@ -49,27 +57,10 @@ class ShowAsJsonAction : AnAction() {
      */
     override fun update(e: AnActionEvent) {
         val project = e.project
-        
+
         // 快捷键始终启用，只要有项目上下文即可
         e.presentation.isEnabled = project != null
         e.presentation.isVisible = true
         e.presentation.text = "Show as JSON"
-    }
-
-    /**
-     * 显示错误消息对话框
-     *
-     * @param project 项目实例
-     */
-    private fun showErrorMessage(project: Project) {
-        val errorMsg = """
-            无法获取查询结果。请确保在查询结果表格中选中一个单元格。
-            
-            提示: 请确保:
-              1. 在查询结果表格中选中一个单元格
-              2. 单元格包含数据（不为空）
-        """.trimIndent()
-
-        Messages.showErrorDialog(project, errorMsg, "Show as JSON")
     }
 }
