@@ -58,6 +58,23 @@ object CellValueExtractor {
     }
 
     /**
+     * 从 DataContext 中提取查询结果表格实例
+     *
+     * 用于为表格添加选择监听器，实现自动更新功能。
+     *
+     * @param dataContext DataGrip 的 DataContext
+     * @return 表格实例，如果无法获取则返回 null
+     */
+    fun extractTable(dataContext: DataContext): JTable? {
+        return try {
+            val component = PlatformDataKeys.CONTEXT_COMPONENT.getData(dataContext) ?: return null
+            findTableComponent(component)
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    /**
      * 从查询结果查看器提取单元格值
      *
      * 通过反射访问 DataGrip 内部的查询结果查看器类，

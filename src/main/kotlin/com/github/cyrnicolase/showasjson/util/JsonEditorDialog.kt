@@ -37,6 +37,14 @@ object JsonEditorDialog {
     @Volatile
     private var psiFileInstance: PsiFile? = null
 
+    /** 单元格选择监听器 */
+    @Volatile
+    private var cellMonitor: CellSelectionMonitor? = null
+
+    /** 当前项目实例 */
+    @Volatile
+    private var currentProject: Project? = null
+
     /**
      * 显示 JSON 编辑器对话框（单例模式）
      *
@@ -104,6 +112,11 @@ object JsonEditorDialog {
     private fun createDialog(project: Project, formattedJson: String, sourceFont: Font?) {
         val dialog = DialogUtils.createDialog(project, "Show as JSON") {
             synchronized(lock) {
+                // 停止监听器
+                cellMonitor?.stop()
+                cellMonitor = null
+                currentProject = null
+                
                 disposeEditor()
                 dialogInstance = null
             }
@@ -112,18 +125,35 @@ object JsonEditorDialog {
         try {
             val editor = createEditor(project, formattedJson, sourceFont)
             val scrollPane = DialogUtils.createScrollPane(editor)
-            val mainPanel = DialogUtils.createMainPanel(scrollPane)
+            val searchToolbar = DialogUtils.createSearchToolbar(editor, dialog)
+            val mainPanel = DialogUtils.createMainPanel(scrollPane, searchToolbar)
 
             dialog.contentPane = mainPanel
 
             // 保存单例引用
             dialogInstance = dialog
             editorInstance = editor
+            currentProject = project
+
+            // 创建并启动单元格选择监听器
+            cellMonitor = CellSelectionMonitor(project) { cellValue, font ->
+                // 自动更新内容
+                editorInstance?.let { ed ->
+                    if (EditorUtils.isEditorValid(ed)) {
+                        val formatted = JsonFormatter.format(cellValue)
+                        updateContent(project, formatted, font, ed)
+                    }
+                }
+            }.apply { start() }
 
             // 显示对话框
             dialog.isVisible = true
         } catch (e: Exception) {
-            // 如果创建编辑器失败，关闭对话框并显示错误消息
+            // 如果创建编辑器失败，清理资源
+            cellMonitor?.stop()
+            cellMonitor = null
+            currentProject = null
+            
             dialog.dispose()
             Messages.showErrorDialog(project, "创建 JSON 编辑器失败：${e.message}", "Show as JSON")
         }
@@ -158,7 +188,7 @@ object JsonEditorDialog {
 
         // 创建并配置编辑器
         val editor = createEditorInstance(project, document, psiFile)
-        EditorUtils.configureBasicSettings(editor)
+        EditorUtils.configureBasicSettings(editor, project)
         sourceFont?.let { EditorUtils.applyFont(editor, it) }
 
         return editor
@@ -280,6 +310,11 @@ object JsonEditorDialog {
         synchronized(lock) {
             val dialog = dialogInstance
             if (dialog != null && dialog.isVisible) {
+                // 停止监听器
+                cellMonitor?.stop()
+                cellMonitor = null
+                currentProject = null
+
                 // 释放编辑器资源
                 disposeEditor()
 

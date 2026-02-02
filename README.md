@@ -1,6 +1,6 @@
 # Show as JSON Plugin for DataGrip
 
-[![Version](https://img.shields.io/badge/version-1.0.11-blue.svg)](https://github.com/cyrnicolase/show-as-json-plugin)
+[![Version](https://img.shields.io/badge/version-1.0.12-blue.svg)](https://github.com/cyrnicolase/show-as-json-plugin)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![DataGrip](https://img.shields.io/badge/DataGrip-231%2B-orange.svg)](https://www.jetbrains.com/datagrip/)
 
@@ -212,7 +212,7 @@ A: 支持 DataGrip 231 到 254.* 版本。
 
 ## 更新日志
 
-### 1.0.11
+### 1.0.12
 
 - ✅ 新增 F7 快捷键 toggle 功能：未选择单元格时按 F7 可关闭已打开的 show as json 面板
 - ✅ 优化代码结构，移除未使用的代码

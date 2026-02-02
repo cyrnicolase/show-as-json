@@ -13,8 +13,9 @@ import com.google.gson.JsonParser
 object JsonFormatter {
     /** Gson 实例（缓存，避免重复创建） */
     private val gson = GsonBuilder()
-        .setPrettyPrinting()  // 启用美化输出
-        .setLenient()          // 允许宽松的 JSON 解析
+        .setPrettyPrinting()      // 启用美化输出
+        .setLenient()              // 允许宽松的 JSON 解析
+        .disableHtmlEscaping()     // 禁用 HTML 转义，保持原始字符串（如 base64 中的 =）
         .create()
 
     /**
@@ -33,9 +34,6 @@ object JsonFormatter {
 
         return try {
             val trimmed = jsonString.trim()
-            if (trimmed.isEmpty()) {
-                return jsonString
-            }
             val jsonElement = JsonParser.parseString(trimmed)
             gson.toJson(jsonElement)
         } catch (e: Exception) {
