@@ -144,7 +144,10 @@ object JsonEditorDialog {
                         updateContent(project, formatted, font, ed)
                     }
                 }
-            }.apply { start() }
+            }.apply { 
+                // 传入编辑器引用，避免从面板中提取选中的文本
+                start(editor) 
+            }
 
             // 显示对话框
             dialog.isVisible = true

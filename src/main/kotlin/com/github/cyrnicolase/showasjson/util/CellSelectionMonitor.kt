@@ -53,17 +53,24 @@ class CellSelectionMonitor(
 
     /** 防抖间隔（毫秒） - 事件模式下的防抖 */
     private val debounceInterval = 50L
+    
+    /** JSON 面板编辑器引用，用于避免从面板中提取选中的文本 */
+    @Volatile
+    private var jsonPanelEditor: com.intellij.openapi.editor.Editor? = null
 
     /**
      * 启动监听器
      *
      * 尝试使用事件监听模式，失败时降级为轮询模式。
+     *
+     * @param editorToExclude JSON 面板编辑器，避免从面板中提取选中的文本
      */
-    fun start() {
+    fun start(editorToExclude: com.intellij.openapi.editor.Editor? = null) {
         if (isRunning || project.isDisposed) {
             return
         }
 
+        jsonPanelEditor = editorToExclude
         isRunning = true
 
         // 先立即尝试启动事件监听模式
@@ -91,6 +98,7 @@ class CellSelectionMonitor(
         currentCellValue = null
         monitoredTable = null
         lastCheckTime = 0L
+        jsonPanelEditor = null
     }
 
     /**
@@ -269,6 +277,13 @@ class CellSelectionMonitor(
             // 异步获取 DataContext
             DataManager.getInstance().dataContextFromFocusAsync.onSuccess { dataContext ->
                 if (!isRunning || project.isDisposed) {
+                    return@onSuccess
+                }
+
+                // 检查焦点是否在 JSON 面板编辑器上
+                // 如果是，则忽略此次检查，避免面板内的文本选择触发更新
+                val currentEditor = com.intellij.openapi.actionSystem.CommonDataKeys.EDITOR.getData(dataContext)
+                if (currentEditor != null && currentEditor == jsonPanelEditor) {
                     return@onSuccess
                 }
 
