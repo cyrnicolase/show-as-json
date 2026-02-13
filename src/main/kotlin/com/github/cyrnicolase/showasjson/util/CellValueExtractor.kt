@@ -20,8 +20,10 @@ object CellValueExtractor {
      *
      * 按优先级尝试以下方法：
      * 1. 从查询结果查看器获取（最可靠）
-     * 2. 从编辑器获取选中的文本
-     * 3. 直接从表格组件获取
+     * 2. 直接从表格组件获取
+     *
+     * 注意：不从通用编辑器获取选中文本，避免错误捕获编辑器中的文本选择。
+     * 只从查询结果表格获取完整的单元格内容。
      *
      * @param dataContext DataGrip 的 DataContext
      * @return 单元格值，如果无法获取则返回 null
@@ -30,10 +32,7 @@ object CellValueExtractor {
         // 方法1: 尝试从查询结果查看器获取
         extractFromResultViewer(dataContext)?.let { return it }
 
-        // 方法2: 尝试从编辑器获取选中的文本
-        extractFromEditor(dataContext)?.let { return it }
-
-        // 方法3: 尝试从表格组件获取
+        // 方法2: 尝试从表格组件获取
         extractFromTable(dataContext)?.let { return it }
 
         return null
@@ -139,16 +138,15 @@ object CellValueExtractor {
     /**
      * 从编辑器提取选中的文本
      *
+     * 已禁用此方法，避免错误捕获代码编辑器中的文本选择。
+     * 只应从查询结果表格获取完整的单元格内容。
+     *
      * @param dataContext DataContext
-     * @return 选中的文本，如果未选中或为空返回 null
+     * @return 始终返回 null
      */
+    @Deprecated("不再使用，避免错误捕获编辑器文本选择", ReplaceWith("null"))
     private fun extractFromEditor(dataContext: DataContext): String? {
-        return try {
-            val editor = CommonDataKeys.EDITOR.getData(dataContext)
-            editor?.selectionModel?.selectedText?.takeIf { it.isNotBlank() }
-        } catch (e: Exception) {
-            null
-        }
+        return null
     }
 
     /**
