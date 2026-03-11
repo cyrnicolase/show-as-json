@@ -1,6 +1,10 @@
 package com.github.cyrnicolase.showasjson.util
 
 import com.intellij.openapi.editor.Editor
+import com.intellij.openapi.editor.ScrollType
+import com.intellij.openapi.editor.event.DocumentEvent
+import com.intellij.openapi.editor.event.DocumentListener
+import com.intellij.openapi.editor.ex.EditorEx
 import com.intellij.openapi.editor.markup.HighlighterLayer
 import com.intellij.openapi.editor.markup.HighlighterTargetArea
 import com.intellij.openapi.editor.markup.RangeHighlighter
@@ -18,6 +22,7 @@ import java.awt.event.WindowAdapter
 import java.awt.event.WindowEvent
 import javax.swing.AbstractAction
 import javax.swing.JButton
+import javax.swing.JCheckBox
 import javax.swing.JComponent
 import javax.swing.JDialog
 import javax.swing.JLabel
@@ -70,9 +75,13 @@ internal object DialogUtils {
 
     /**
      * 创建包含编辑器的滚动面板
+     *
+     * 优先使用 EditorEx 自带的 scrollPane，确保 editor.scrollingModel 滚动时
+     * 可见滚动条能同步更新。若无法获取则降级为普通包裹。
      */
     fun createScrollPane(editor: Editor): JScrollPane {
-        return JScrollPane(editor.component).apply {
+        val scrollPane = (editor as? EditorEx)?.scrollPane ?: JScrollPane(editor.component)
+        return scrollPane.apply {
             verticalScrollBarPolicy = JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED
             horizontalScrollBarPolicy = JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED
             verticalScrollBar.unitIncrement = 16
@@ -156,6 +165,9 @@ internal object DialogUtils {
         val searchField = JTextField(20).apply {
             toolTipText = "搜索 JSON 内容（支持 Cmd+F / Ctrl+F）"
         }
+        val caseSensitiveCheckBox = JCheckBox("区分大小写").apply {
+            toolTipText = "启用后按大小写精确匹配"
+        }
         val prevButton = JButton("上一个").apply { isEnabled = false }
         val nextButton = JButton("下一个").apply { isEnabled = false }
         val matchLabel = JLabel("匹配: 0/0").apply { foreground = JBColor.GRAY }
@@ -171,12 +183,35 @@ internal object DialogUtils {
             highlighters.clear()
         }
 
+        fun resetSearchState(clearText: Boolean) {
+            if (clearText) {
+                searchField.text = ""
+            }
+            clearHighlighters()
+            matches = emptyList()
+            currentMatchIndex = -1
+            currentSearchTextLength = 0
+            prevButton.isEnabled = false
+            nextButton.isEnabled = false
+            matchLabel.text = "匹配: 0/0"
+            matchLabel.foreground = JBColor.GRAY
+        }
+
         fun scrollToMatch(offset: Int) {
             if (!EditorUtils.isEditorValid(editor)) return
+            val boundedOffset = offset.coerceIn(0, editor.document.textLength)
+            val selectionEnd = (boundedOffset + currentSearchTextLength).coerceAtMost(editor.document.textLength)
             runCatching {
-                editor.caretModel.moveToOffset(offset)
-                editor.selectionModel.setSelection(offset, offset + currentSearchTextLength)
-                editor.scrollingModel.scrollToCaret(com.intellij.openapi.editor.ScrollType.CENTER)
+                editor.caretModel.moveToOffset(boundedOffset)
+                editor.selectionModel.setSelection(boundedOffset, selectionEnd)
+                editor.scrollingModel.scrollToCaret(ScrollType.CENTER)
+            }
+            // 等待重绘完成后再居中一次，确保位置稳定。
+            SwingUtilities.invokeLater {
+                if (!EditorUtils.isEditorValid(editor)) return@invokeLater
+                runCatching {
+                    editor.scrollingModel.scrollToCaret(ScrollType.CENTER)
+                }
             }
         }
 
@@ -184,13 +219,7 @@ internal object DialogUtils {
             if (!EditorUtils.isEditorValid(editor)) return
             val searchText = searchField.text.trim()
             if (searchText.isEmpty()) {
-                clearHighlighters()
-                matches = emptyList()
-                currentMatchIndex = -1
-                currentSearchTextLength = 0
-                prevButton.isEnabled = false
-                nextButton.isEnabled = false
-                matchLabel.text = "匹配: 0/0"
+                resetSearchState(clearText = false)
                 return
             }
 
@@ -198,13 +227,14 @@ internal object DialogUtils {
             clearHighlighters()
 
             val text = editor.document.text
-            val searchLower = searchText.lowercase()
-            val textLower = text.lowercase()
+            val isCaseSensitive = caseSensitiveCheckBox.isSelected
+            val targetSearchText = if (isCaseSensitive) searchText else searchText.lowercase()
+            val targetText = if (isCaseSensitive) text else text.lowercase()
 
             matches = buildList {
                 var idx = 0
                 while (true) {
-                    idx = textLower.indexOf(searchLower, idx)
+                    idx = targetText.indexOf(targetSearchText, idx)
                     if (idx == -1) break
                     add(idx)
                     idx += searchText.length
@@ -230,11 +260,13 @@ internal object DialogUtils {
                 prevButton.isEnabled = true
                 nextButton.isEnabled = true
                 matchLabel.text = "匹配: 1/${matches.size}"
+                matchLabel.foreground = JBColor.foreground()
             } else {
                 currentMatchIndex = -1
                 prevButton.isEnabled = false
                 nextButton.isEnabled = false
-                matchLabel.text = "匹配: 0/0"
+                matchLabel.text = "未找到匹配（0/0）"
+                matchLabel.foreground = JBColor.GRAY
             }
         }
 
@@ -243,6 +275,7 @@ internal object DialogUtils {
             currentMatchIndex = if (currentMatchIndex > 0) currentMatchIndex - 1 else matches.size - 1
             scrollToMatch(matches[currentMatchIndex])
             matchLabel.text = "匹配: ${currentMatchIndex + 1}/${matches.size}"
+            matchLabel.foreground = JBColor.foreground()
         }
 
         fun navigateToNext() {
@@ -250,28 +283,35 @@ internal object DialogUtils {
             currentMatchIndex = if (currentMatchIndex < matches.size - 1) currentMatchIndex + 1 else 0
             scrollToMatch(matches[currentMatchIndex])
             matchLabel.text = "匹配: ${currentMatchIndex + 1}/${matches.size}"
+            matchLabel.foreground = JBColor.foreground()
         }
 
         val toolbarPanel = JPanel(FlowLayout(FlowLayout.LEFT, 5, 5)).apply {
             border = JBUI.Borders.empty(5)
             add(JLabel("搜索:"))
             add(searchField)
+            add(caseSensitiveCheckBox)
             add(prevButton)
             add(nextButton)
             add(matchLabel)
         }
 
+        // 编辑器内容变更时，若搜索栏可见则基于新内容实时重算匹配，避免使用旧偏移定位。
+        val documentListener = object : DocumentListener {
+            override fun documentChanged(event: DocumentEvent) {
+                if (!toolbarPanel.isVisible) return
+                SwingUtilities.invokeLater {
+                    if (!dialog.isVisible || !EditorUtils.isEditorValid(editor)) return@invokeLater
+                    performSearch()
+                }
+            }
+        }
+        editor.document.addDocumentListener(documentListener)
+
         fun hideSearchToolbar() {
             if (!EditorUtils.isEditorValid(editor)) return
             toolbarPanel.isVisible = false
-            searchField.text = ""
-            clearHighlighters()
-            matches = emptyList()
-            currentMatchIndex = -1
-            currentSearchTextLength = 0
-            prevButton.isEnabled = false
-            nextButton.isEnabled = false
-            matchLabel.text = "匹配: 0/0"
+            resetSearchState(clearText = true)
             toolbarPanel.parent?.revalidate()
             toolbarPanel.parent?.repaint()
         }
@@ -288,13 +328,7 @@ internal object DialogUtils {
                     searchField.text = selectedText
                     performSearch()
                 } else {
-                    clearHighlighters()
-                    matches = emptyList()
-                    currentMatchIndex = -1
-                    currentSearchTextLength = 0
-                    prevButton.isEnabled = false
-                    nextButton.isEnabled = false
-                    matchLabel.text = "匹配: 0/0"
+                    resetSearchState(clearText = false)
                 }
             } else if (shouldPrefill && searchField.text != selectedText) {
                 searchField.text = selectedText
@@ -310,6 +344,7 @@ internal object DialogUtils {
         searchField.addKeyListener(object : KeyAdapter() {
             override fun keyReleased(e: KeyEvent?) = performSearch()
         })
+        caseSensitiveCheckBox.addActionListener { performSearch() }
         prevButton.addActionListener { navigateToPrevious() }
         nextButton.addActionListener { navigateToNext() }
 
@@ -319,14 +354,7 @@ internal object DialogUtils {
                 if (searchField.text.trim().isEmpty()) {
                     hideSearchToolbar()
                 } else {
-                    searchField.text = ""
-                    clearHighlighters()
-                    matches = emptyList()
-                    currentMatchIndex = -1
-                    currentSearchTextLength = 0
-                    prevButton.isEnabled = false
-                    nextButton.isEnabled = false
-                    matchLabel.text = "匹配: 0/0"
+                    resetSearchState(clearText = true)
                 }
             }
         }
@@ -380,6 +408,7 @@ internal object DialogUtils {
             override fun windowClosed(e: WindowEvent?) {
                 runCatching {
                     com.intellij.ide.IdeEventQueue.getInstance().removeDispatcher(ideEventDispatcher)
+                    editor.document.removeDocumentListener(documentListener)
                     clearHighlighters()
                 }
             }

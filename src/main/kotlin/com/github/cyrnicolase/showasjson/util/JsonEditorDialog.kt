@@ -50,6 +50,24 @@ object JsonEditorDialog {
     /** 内容更新序列，避免异步任务乱序覆盖 */
     private val contentUpdateSequence = AtomicLong(0)
 
+    private fun formatByCurrentMode(content: String): String {
+        return if (isPrettyFormat) {
+            JsonFormatter.formatPretty(content)
+        } else {
+            JsonFormatter.formatCompact(content)
+        }
+    }
+
+    private fun stopCellMonitor() {
+        cellMonitor?.stop()
+        cellMonitor = null
+    }
+
+    private fun resetDialogState() {
+        originalJsonContent = null
+        isPrettyFormat = true
+    }
+
     /**
      * 显示 JSON 编辑器对话框（单例模式）
      *
@@ -74,11 +92,7 @@ object JsonEditorDialog {
         originalJsonContent = trimmedContent
         
         // 根据当前格式选择格式化方法
-        val formattedJson = if (isPrettyFormat) {
-            JsonFormatter.formatPretty(trimmedContent)
-        } else {
-            JsonFormatter.formatCompact(trimmedContent)
-        }
+        val formattedJson = formatByCurrentMode(trimmedContent)
 
         synchronized(lock) {
             // 再次检查项目是否已关闭（可能在等待锁时项目被关闭）
@@ -126,14 +140,8 @@ object JsonEditorDialog {
     private fun createDialog(project: Project, formattedJson: String, sourceFont: Font?) {
         val dialog = DialogUtils.createDialog(project, "Show as JSON") {
             synchronized(lock) {
-                // 停止监听器
-                cellMonitor?.stop()
-                cellMonitor = null
-                
-                // 重置状态
-                originalJsonContent = null
-                isPrettyFormat = true  // 重置为默认的美化格式
-                
+                stopCellMonitor()
+                resetDialogState()
                 disposeEditor()
                 dialogInstance = null
             }
@@ -149,11 +157,7 @@ object JsonEditorDialog {
                     // 格式切换回调
                     isPrettyFormat = isPretty
                     originalJsonContent?.let { original ->
-                        val newFormatted = if (isPretty) {
-                            JsonFormatter.formatPretty(original)
-                        } else {
-                            JsonFormatter.formatCompact(original)
-                        }
+                        val newFormatted = formatByCurrentMode(original)
                         updateContent(project, newFormatted, sourceFont, editor)
                     }
                 },
@@ -194,13 +198,9 @@ object JsonEditorDialog {
                         // 保存原始内容
                         val trimmed = cellValue.trim()
                         originalJsonContent = trimmed
-                        
+
                         // 根据当前格式偏好格式化
-                        val formatted = if (isPrettyFormat) {
-                            JsonFormatter.formatPretty(trimmed)
-                        } else {
-                            JsonFormatter.formatCompact(trimmed)
-                        }
+                        val formatted = formatByCurrentMode(trimmed)
                         updateContent(project, formatted, font, ed)
                     }
                 }
@@ -213,9 +213,7 @@ object JsonEditorDialog {
             dialog.isVisible = true
         } catch (e: Exception) {
             // 如果创建编辑器失败，清理资源
-            cellMonitor?.stop()
-            cellMonitor = null
-            
+            stopCellMonitor()
             dialog.dispose()
             Messages.showErrorDialog(project, "创建 JSON 编辑器失败：${e.message}", "Show as JSON")
         }
@@ -381,13 +379,8 @@ object JsonEditorDialog {
         synchronized(lock) {
             val dialog = dialogInstance
             if (dialog != null && dialog.isVisible) {
-                // 停止监听器
-                cellMonitor?.stop()
-                cellMonitor = null
-                
-                // 重置状态
-                originalJsonContent = null
-                isPrettyFormat = true  // 重置为默认的美化格式
+                stopCellMonitor()
+                resetDialogState()
 
                 // 释放编辑器资源
                 disposeEditor()
