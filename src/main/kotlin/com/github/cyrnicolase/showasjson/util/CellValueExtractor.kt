@@ -1,10 +1,11 @@
 package com.github.cyrnicolase.showasjson.util
 
 import com.intellij.openapi.actionSystem.DataContext
-import com.intellij.openapi.actionSystem.CommonDataKeys
 import com.intellij.openapi.actionSystem.PlatformDataKeys
 import javax.swing.JTable
 import java.awt.Component
+import java.awt.Container
+import java.util.ArrayDeque
 
 /**
  * 单元格值提取工具类
@@ -136,20 +137,6 @@ object CellValueExtractor {
     }
 
     /**
-     * 从编辑器提取选中的文本
-     *
-     * 已禁用此方法，避免错误捕获代码编辑器中的文本选择。
-     * 只应从查询结果表格获取完整的单元格内容。
-     *
-     * @param dataContext DataContext
-     * @return 始终返回 null
-     */
-    @Deprecated("不再使用，避免错误捕获编辑器文本选择", ReplaceWith("null"))
-    private fun extractFromEditor(dataContext: DataContext): String? {
-        return null
-    }
-
-    /**
      * 从表格组件提取选中的单元格值
      *
      * @param dataContext DataContext
@@ -240,6 +227,7 @@ object CellValueExtractor {
      * @return 找到的 JTable 组件，如果未找到返回 null
      */
     private fun findTableComponent(component: Component): JTable? {
+        // 先沿父链查找（焦点通常在 JTable 内部组件上）
         var current: Component? = component
         while (current != null) {
             if (current is JTable) {
@@ -247,6 +235,28 @@ object CellValueExtractor {
             }
             current = current.parent
         }
+
+        // 再在当前组件子树中查找（DataContext 可能落在 JScrollPane/Panel 上）
+        return findTableInDescendants(component)
+    }
+
+    /**
+     * 在组件子树中查找 JTable（广度优先）
+     */
+    private fun findTableInDescendants(root: Component): JTable? {
+        val queue = ArrayDeque<Component>()
+        queue.add(root)
+
+        while (queue.isNotEmpty()) {
+            val current = queue.removeFirst()
+            if (current is JTable) {
+                return current
+            }
+            if (current is Container) {
+                current.components.forEach { child -> queue.addLast(child) }
+            }
+        }
+
         return null
     }
 

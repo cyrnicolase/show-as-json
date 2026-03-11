@@ -9,14 +9,13 @@ import com.intellij.openapi.project.Project
 import com.intellij.openapi.wm.WindowManager
 import com.intellij.ui.JBColor
 import com.intellij.util.ui.JBUI
-import java.awt.BorderLayout
 import java.awt.FlowLayout
 import java.awt.Frame
-import java.awt.event.KeyEvent
+import java.awt.event.InputEvent
 import java.awt.event.KeyAdapter
+import java.awt.event.KeyEvent
 import java.awt.event.WindowAdapter
 import java.awt.event.WindowEvent
-import java.awt.event.InputEvent
 import javax.swing.AbstractAction
 import javax.swing.JButton
 import javax.swing.JComponent
@@ -26,6 +25,7 @@ import javax.swing.JPanel
 import javax.swing.JScrollPane
 import javax.swing.JTextField
 import javax.swing.KeyStroke
+import javax.swing.SwingUtilities
 import javax.swing.WindowConstants
 
 /**
@@ -36,19 +36,15 @@ import javax.swing.WindowConstants
  * @author cyrnicolase
  */
 internal object DialogUtils {
-    /** 对话框宽度 */
     const val DIALOG_WIDTH = 900
-
-    /** 对话框高度 */
     const val DIALOG_HEIGHT = 700
 
     /**
      * 创建并配置对话框
      *
-     * @param project 项目实例
-     * @param title 对话框标题
-     * @param onClose 窗口关闭时的回调
-     * @return 配置好的对话框
+     * @param project  项目实例
+     * @param title    对话框标题
+     * @param onClose  窗口关闭时的回调
      */
     fun createDialog(project: Project, title: String, onClose: () -> Unit): JDialog {
         val ownerFrame = WindowManager.getInstance().getFrame(project) as? Frame
@@ -58,23 +54,15 @@ internal object DialogUtils {
         dialog.setLocationRelativeTo(ownerFrame)
         dialog.defaultCloseOperation = WindowConstants.DISPOSE_ON_CLOSE
 
-        // 注册 ESC 键关闭对话框（使用现代的 InputMap/ActionMap 方式）
-        val escapeKeyStroke = KeyStroke.getKeyStroke(KeyEvent.VK_ESCAPE, 0)
-        val inputMap = dialog.rootPane.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW)
-        val actionMap = dialog.rootPane.actionMap
-        
-        inputMap.put(escapeKeyStroke, "closeDialog")
-        actionMap.put("closeDialog", object : AbstractAction() {
-            override fun actionPerformed(e: java.awt.event.ActionEvent?) {
-                dialog.dispose()
-            }
+        // ESC 关闭对话框
+        val escKeyStroke = KeyStroke.getKeyStroke(KeyEvent.VK_ESCAPE, 0)
+        dialog.rootPane.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).put(escKeyStroke, "closeDialog")
+        dialog.rootPane.actionMap.put("closeDialog", object : AbstractAction() {
+            override fun actionPerformed(e: java.awt.event.ActionEvent?) = dialog.dispose()
         })
 
-        // 添加窗口关闭监听器
         dialog.addWindowListener(object : WindowAdapter() {
-            override fun windowClosed(e: WindowEvent?) {
-                onClose()
-            }
+            override fun windowClosed(e: WindowEvent?) = onClose()
         })
 
         return dialog
@@ -82,19 +70,11 @@ internal object DialogUtils {
 
     /**
      * 创建包含编辑器的滚动面板
-     *
-     * @param editor 编辑器实例
-     * @return 配置好的滚动面板
-     * @throws IllegalStateException 如果编辑器组件为 null
      */
     fun createScrollPane(editor: Editor): JScrollPane {
-        val component = editor.component
-        
-        return JScrollPane(component).apply {
+        return JScrollPane(editor.component).apply {
             verticalScrollBarPolicy = JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED
             horizontalScrollBarPolicy = JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED
-
-            // 设置滚动速度：单位增量 16 像素，块增量 80 像素
             verticalScrollBar.unitIncrement = 16
             horizontalScrollBar.unitIncrement = 16
             verticalScrollBar.blockIncrement = 80
@@ -103,96 +83,107 @@ internal object DialogUtils {
     }
 
     /**
-     * 创建主面板
+     * 创建格式工具栏（美化/紧凑切换、全部展开/折叠）
      *
-     * @param scrollPane 滚动面板
-     * @param searchToolbar 搜索工具栏（可选）
-     * @return 配置好的主面板
+     * @param onFormatChange  格式切换回调，参数 isPretty
+     * @param onExpandAll     全部展开回调
+     * @param onCollapseAll   全部折叠回调
      */
-    fun createMainPanel(scrollPane: JScrollPane, searchToolbar: JPanel? = null): JPanel {
-        return JPanel(BorderLayout()).apply {
-            border = JBUI.Borders.empty(10)
-            searchToolbar?.let {
-                add(it, BorderLayout.NORTH)
-                // 默认隐藏搜索工具栏
-                it.isVisible = false
+    fun createFormatToolbar(
+        onFormatChange: (isPretty: Boolean) -> Unit,
+        onExpandAll: () -> Unit,
+        onCollapseAll: () -> Unit
+    ): JPanel {
+        var isPrettyFormat = true
+
+        val prettyButton = JButton("美化").apply {
+            toolTipText = "切换到美化格式（带缩进和换行）"
+            isEnabled = false
+        }
+        val compactButton = JButton("紧凑").apply {
+            toolTipText = "切换到紧凑格式（单行无多余空格）"
+        }
+
+        prettyButton.addActionListener {
+            if (!isPrettyFormat) {
+                isPrettyFormat = true
+                prettyButton.isEnabled = false
+                compactButton.isEnabled = true
+                onFormatChange(true)
             }
-            add(scrollPane, BorderLayout.CENTER)
+        }
+        compactButton.addActionListener {
+            if (isPrettyFormat) {
+                isPrettyFormat = false
+                prettyButton.isEnabled = true
+                compactButton.isEnabled = false
+                onFormatChange(false)
+            }
+        }
+
+        val expandButton = JButton("全部展开").apply {
+            toolTipText = "展开所有折叠的 JSON 节点"
+            addActionListener { onExpandAll() }
+        }
+        val collapseButton = JButton("全部折叠").apply {
+            toolTipText = "折叠所有 JSON 对象和数组"
+            addActionListener { onCollapseAll() }
+        }
+
+        return JPanel(FlowLayout(FlowLayout.LEFT, 5, 5)).apply {
+            add(JLabel("格式:"))
+            add(prettyButton)
+            add(compactButton)
+            add(JLabel("  |  ").apply { foreground = JBColor.GRAY })
+            add(expandButton)
+            add(collapseButton)
         }
     }
 
     /**
-     * 创建搜索工具栏
+     * 创建搜索工具栏，并将 Cmd+F / Ctrl+F 快捷键注册到对话框。
      *
-     * @param editor 编辑器实例
-     * @param dialog 对话框实例（用于注册快捷键和清理资源）
-     * @return 配置好的搜索工具栏面板
+     * 快捷键拦截策略：
+     * - `IdeEventQueue.addDispatcher`：在 IntelliJ Action System 之前拦截，确保编辑器
+     *   内容组件（EditorImpl）获得焦点时也能触发（原 KeyboardFocusManager 方案的盲区）。
+     * - `dialog.rootPane` WHEN_IN_FOCUSED_WINDOW：作为普通 Swing 组件获得焦点时的兜底。
+     *
+     * @param editor  编辑器实例
+     * @param dialog  对话框实例
+     * @return 搜索工具栏面板（默认隐藏）
      */
     fun createSearchToolbar(editor: Editor, dialog: JDialog): JPanel {
         val searchField = JTextField(20).apply {
             toolTipText = "搜索 JSON 内容（支持 Cmd+F / Ctrl+F）"
         }
-        val prevButton = JButton("上一个").apply {
-            isEnabled = false
-        }
-        val nextButton = JButton("下一个").apply {
-            isEnabled = false
-        }
-        val matchLabel = JLabel("匹配: 0/0").apply {
-            foreground = JBColor.GRAY
-        }
+        val prevButton = JButton("上一个").apply { isEnabled = false }
+        val nextButton = JButton("下一个").apply { isEnabled = false }
+        val matchLabel = JLabel("匹配: 0/0").apply { foreground = JBColor.GRAY }
 
         val highlighters = mutableListOf<RangeHighlighter>()
         var currentMatchIndex = -1
         var matches = emptyList<Int>()
-        var currentSearchTextLength = 0  // 保存当前搜索文本的长度，用于选中文本
+        var currentSearchTextLength = 0
 
-        // 清理高亮器的函数
         fun clearHighlighters() {
             if (!EditorUtils.isEditorValid(editor)) return
-            
-            highlighters.forEach { highlighter ->
-                try {
-                    editor.markupModel.removeHighlighter(highlighter)
-                } catch (e: Exception) {
-                    // 忽略已释放的高亮器
-                }
-            }
+            highlighters.forEach { runCatching { editor.markupModel.removeHighlighter(it) } }
             highlighters.clear()
         }
 
-        // 滚动到匹配位置并选中匹配的文本
-        fun scrollToMatch(editor: Editor, offset: Int, searchTextLength: Int) {
+        fun scrollToMatch(offset: Int) {
             if (!EditorUtils.isEditorValid(editor)) return
-            
-            try {
-                // 移动光标到匹配开始位置
+            runCatching {
                 editor.caretModel.moveToOffset(offset)
-                
-                // 选中匹配的文本范围
-                editor.selectionModel.setSelection(offset, offset + searchTextLength)
-                
-                // 滚动到光标位置（居中显示）
+                editor.selectionModel.setSelection(offset, offset + currentSearchTextLength)
                 editor.scrollingModel.scrollToCaret(com.intellij.openapi.editor.ScrollType.CENTER)
-            } catch (e: Exception) {
-                // 忽略编辑器操作错误
             }
         }
 
-        // 在对话框关闭时清理高亮器
-        dialog.addWindowListener(object : WindowAdapter() {
-            override fun windowClosed(e: WindowEvent?) {
-                clearHighlighters()
-            }
-        })
-
-        // 搜索文本
         fun performSearch() {
             if (!EditorUtils.isEditorValid(editor)) return
-            
             val searchText = searchField.text.trim()
             if (searchText.isEmpty()) {
-                // 清除高亮
                 clearHighlighters()
                 matches = emptyList()
                 currentMatchIndex = -1
@@ -203,56 +194,42 @@ internal object DialogUtils {
                 return
             }
 
-            // 保存搜索文本长度
             currentSearchTextLength = searchText.length
-
-            // 清除旧的高亮
             clearHighlighters()
 
-            // 查找所有匹配项
-            val document = editor.document
-            val text = document.text
-            val searchTextLower = searchText.lowercase()
+            val text = editor.document.text
+            val searchLower = searchText.lowercase()
             val textLower = text.lowercase()
 
-            matches = mutableListOf<Int>().apply {
-                var index = 0
+            matches = buildList {
+                var idx = 0
                 while (true) {
-                    index = textLower.indexOf(searchTextLower, index)
-                    if (index == -1) break
-                    add(index)
-                    index += searchText.length
+                    idx = textLower.indexOf(searchLower, idx)
+                    if (idx == -1) break
+                    add(idx)
+                    idx += searchText.length
                 }
             }
 
-            // 高亮所有匹配项
-            // 使用 JBColor.YELLOW 创建高亮背景色
-            val textAttributes = TextAttributes().apply {
-                backgroundColor = JBColor.YELLOW
-            }
-            
+            val attrs = TextAttributes().apply { backgroundColor = JBColor.YELLOW }
             matches.forEach { offset ->
-                try {
-                    val highlighter = editor.markupModel.addRangeHighlighter(
-                        offset,
-                        offset + searchText.length,
-                        HighlighterLayer.SELECTION - 1,  // 使用较高的层级确保可见
-                        textAttributes,
-                        HighlighterTargetArea.EXACT_RANGE
+                runCatching {
+                    highlighters.add(
+                        editor.markupModel.addRangeHighlighter(
+                            offset, offset + searchText.length,
+                            HighlighterLayer.SELECTION - 1, attrs,
+                            HighlighterTargetArea.EXACT_RANGE
+                        )
                     )
-                    highlighters.add(highlighter)
-                } catch (e: Exception) {
-                    // 忽略高亮器添加错误（可能编辑器已释放）
                 }
             }
 
-            // 更新 UI
             if (matches.isNotEmpty()) {
                 currentMatchIndex = 0
-                scrollToMatch(editor, matches[0], currentSearchTextLength)
+                scrollToMatch(matches[0])
                 prevButton.isEnabled = true
                 nextButton.isEnabled = true
-                matchLabel.text = "匹配: ${currentMatchIndex + 1}/${matches.size}"
+                matchLabel.text = "匹配: 1/${matches.size}"
             } else {
                 currentMatchIndex = -1
                 prevButton.isEnabled = false
@@ -261,33 +238,20 @@ internal object DialogUtils {
             }
         }
 
-        // 导航到上一个匹配
         fun navigateToPrevious() {
             if (!EditorUtils.isEditorValid(editor) || matches.isEmpty() || currentMatchIndex < 0) return
             currentMatchIndex = if (currentMatchIndex > 0) currentMatchIndex - 1 else matches.size - 1
-            scrollToMatch(editor, matches[currentMatchIndex], currentSearchTextLength)
+            scrollToMatch(matches[currentMatchIndex])
             matchLabel.text = "匹配: ${currentMatchIndex + 1}/${matches.size}"
         }
 
-        // 导航到下一个匹配
         fun navigateToNext() {
             if (!EditorUtils.isEditorValid(editor) || matches.isEmpty() || currentMatchIndex < 0) return
             currentMatchIndex = if (currentMatchIndex < matches.size - 1) currentMatchIndex + 1 else 0
-            scrollToMatch(editor, matches[currentMatchIndex], currentSearchTextLength)
+            scrollToMatch(matches[currentMatchIndex])
             matchLabel.text = "匹配: ${currentMatchIndex + 1}/${matches.size}"
         }
 
-        // 绑定事件
-        searchField.addKeyListener(object : KeyAdapter() {
-            override fun keyReleased(e: KeyEvent?) {
-                performSearch()
-            }
-        })
-
-        prevButton.addActionListener { navigateToPrevious() }
-        nextButton.addActionListener { navigateToNext() }
-
-        // 创建工具栏面板
         val toolbarPanel = JPanel(FlowLayout(FlowLayout.LEFT, 5, 5)).apply {
             border = JBUI.Borders.empty(5)
             add(JLabel("搜索:"))
@@ -297,77 +261,64 @@ internal object DialogUtils {
             add(matchLabel)
         }
 
-        // 切换搜索工具栏显示/隐藏的函数
-        fun toggleSearchToolbar() {
+        fun hideSearchToolbar() {
             if (!EditorUtils.isEditorValid(editor)) return
-            
-            val isVisible = toolbarPanel.isVisible
-            toolbarPanel.isVisible = !isVisible
-            
-            if (toolbarPanel.isVisible) {
-                // 显示搜索工具栏时，聚焦搜索框并清空之前的高亮
-                searchField.requestFocus()
-                searchField.selectAll()
-                clearHighlighters()
-                matches = emptyList()
-                currentMatchIndex = -1
-                currentSearchTextLength = 0
-                prevButton.isEnabled = false
-                nextButton.isEnabled = false
-                matchLabel.text = "匹配: 0/0"
-            } else {
-                // 隐藏搜索工具栏时，清除搜索内容和高亮
-                searchField.text = ""
-                clearHighlighters()
-                matches = emptyList()
-                currentMatchIndex = -1
-                currentSearchTextLength = 0
-            }
-            
-            // 刷新对话框布局
+            toolbarPanel.isVisible = false
+            searchField.text = ""
+            clearHighlighters()
+            matches = emptyList()
+            currentMatchIndex = -1
+            currentSearchTextLength = 0
+            prevButton.isEnabled = false
+            nextButton.isEnabled = false
+            matchLabel.text = "匹配: 0/0"
             toolbarPanel.parent?.revalidate()
             toolbarPanel.parent?.repaint()
         }
 
-        // 检测操作系统类型（Mac 使用 Cmd，其他使用 Ctrl）
-        val isMac = System.getProperty("os.name").lowercase().contains("mac")
-        val modifierKey = if (isMac) {
-            InputEvent.META_DOWN_MASK
-        } else {
-            InputEvent.CTRL_DOWN_MASK
+        fun openSearchToolbar(prefillFromSelection: Boolean) {
+            if (!EditorUtils.isEditorValid(editor)) return
+
+            val selectedText = editor.selectionModel.selectedText?.takeIf { it.isNotBlank() }
+            val shouldPrefill = prefillFromSelection && selectedText != null
+
+            if (!toolbarPanel.isVisible) {
+                toolbarPanel.isVisible = true
+                if (shouldPrefill) {
+                    searchField.text = selectedText
+                    performSearch()
+                } else {
+                    clearHighlighters()
+                    matches = emptyList()
+                    currentMatchIndex = -1
+                    currentSearchTextLength = 0
+                    prevButton.isEnabled = false
+                    nextButton.isEnabled = false
+                    matchLabel.text = "匹配: 0/0"
+                }
+            } else if (shouldPrefill && searchField.text != selectedText) {
+                searchField.text = selectedText
+                performSearch()
+            }
+
+            searchField.requestFocus()
+            searchField.selectAll()
+            toolbarPanel.parent?.revalidate()
+            toolbarPanel.parent?.repaint()
         }
 
-        // 注册 Cmd+F (Mac) 或 Ctrl+F (Windows/Linux) 快捷键切换搜索工具栏显示/隐藏
-        // 使用现代的 InputMap/ActionMap 方式替代已弃用的 registerKeyboardAction
-        val searchKeyStroke = KeyStroke.getKeyStroke(KeyEvent.VK_F, modifierKey)
-        val inputMap = dialog.rootPane.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW)
-        val actionMap = dialog.rootPane.actionMap
-        
-        inputMap.put(searchKeyStroke, "toggleSearch")
-        actionMap.put("toggleSearch", object : AbstractAction() {
-            override fun actionPerformed(e: java.awt.event.ActionEvent?) {
-                toggleSearchToolbar()
-            }
+        searchField.addKeyListener(object : KeyAdapter() {
+            override fun keyReleased(e: KeyEvent?) = performSearch()
         })
+        prevButton.addActionListener { navigateToPrevious() }
+        nextButton.addActionListener { navigateToNext() }
 
-        // 注册 ESC 键处理（当搜索框获得焦点时，使用现代的 InputMap/ActionMap 方式）
-        val escapeKeyStroke = KeyStroke.getKeyStroke(KeyEvent.VK_ESCAPE, 0)
-        val searchFieldInputMap = searchField.getInputMap(JComponent.WHEN_FOCUSED)
-        val searchFieldActionMap = searchField.actionMap
-        
-        searchFieldInputMap.put(escapeKeyStroke, "clearOrHideSearch")
-        searchFieldActionMap.put("clearOrHideSearch", object : AbstractAction() {
+        // ESC：清空搜索内容 或 隐藏工具栏
+        val escAction = object : AbstractAction() {
             override fun actionPerformed(e: java.awt.event.ActionEvent?) {
-                val searchText = searchField.text.trim()
-                if (searchText.isEmpty()) {
-                    // 如果搜索框为空，隐藏搜索工具栏
-                    toolbarPanel.isVisible = false
-                    clearHighlighters()
-                    currentSearchTextLength = 0
-                    toolbarPanel.parent?.revalidate()
-                    toolbarPanel.parent?.repaint()
+                if (searchField.text.trim().isEmpty()) {
+                    hideSearchToolbar()
                 } else {
-                    // 如果搜索框有内容，清除搜索内容和高亮
                     searchField.text = ""
                     clearHighlighters()
                     matches = emptyList()
@@ -378,9 +329,62 @@ internal object DialogUtils {
                     matchLabel.text = "匹配: 0/0"
                 }
             }
+        }
+        searchField.getInputMap(JComponent.WHEN_FOCUSED)
+            .put(KeyStroke.getKeyStroke(KeyEvent.VK_ESCAPE, 0), "clearOrHideSearch")
+        searchField.actionMap.put("clearOrHideSearch", escAction)
+
+        // ── 快捷键注册 ─────────────────────────────────────────────────────────
+        val isMac = System.getProperty("os.name").lowercase().contains("mac")
+        val modifierMask = if (isMac) InputEvent.META_DOWN_MASK else InputEvent.CTRL_DOWN_MASK
+        val allowedModifierMask = InputEvent.META_DOWN_MASK or InputEvent.CTRL_DOWN_MASK or
+            InputEvent.ALT_DOWN_MASK or InputEvent.SHIFT_DOWN_MASK
+        val searchKeyStroke = KeyStroke.getKeyStroke(KeyEvent.VK_F, modifierMask)
+        val searchAction = object : AbstractAction() {
+            override fun actionPerformed(e: java.awt.event.ActionEvent?) = openSearchToolbar(prefillFromSelection = true)
+        }
+        fun isExactSearchShortcut(event: KeyEvent): Boolean {
+            if (event.keyCode != KeyEvent.VK_F) return false
+            val normalizedModifiers = event.modifiersEx and allowedModifierMask
+            return normalizedModifiers == modifierMask
+        }
+
+        // 兜底：普通 Swing 组件获得焦点时（如工具栏按钮）
+        dialog.rootPane.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).put(searchKeyStroke, "toggleSearch")
+        dialog.rootPane.actionMap.put("toggleSearch", searchAction)
+
+        // 主路径：IdeEventQueue 在 IntelliJ Action System 之前拦截，
+        // 解决编辑器内容组件（EditorImpl）获得焦点时 Cmd+F 被 Action System 消费的问题。
+        val ideEventDispatcher = com.intellij.ide.IdeEventQueue.EventDispatcher { event ->
+            if (event is KeyEvent && event.id == KeyEvent.KEY_PRESSED && dialog.isVisible) {
+                val source = event.source
+                val isInDialog = source is java.awt.Component &&
+                    SwingUtilities.isDescendingFrom(source, dialog)
+                if (isInDialog) {
+                    if (isExactSearchShortcut(event)) {
+                        SwingUtilities.invokeLater {
+                            if (dialog.isVisible) {
+                                openSearchToolbar(prefillFromSelection = true)
+                            }
+                        }
+                        return@EventDispatcher true
+                    }
+                }
+            }
+            false
+        }
+        com.intellij.ide.IdeEventQueue.getInstance().addDispatcher(ideEventDispatcher, null)
+
+        // 对话框关闭时清理资源
+        dialog.addWindowListener(object : WindowAdapter() {
+            override fun windowClosed(e: WindowEvent?) {
+                runCatching {
+                    com.intellij.ide.IdeEventQueue.getInstance().removeDispatcher(ideEventDispatcher)
+                    clearHighlighters()
+                }
+            }
         })
 
         return toolbarPanel
     }
 }
-

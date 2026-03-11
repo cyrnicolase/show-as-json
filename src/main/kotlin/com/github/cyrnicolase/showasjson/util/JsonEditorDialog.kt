@@ -11,7 +11,9 @@ import com.intellij.openapi.ui.Messages
 import com.intellij.psi.PsiDocumentManager
 import com.intellij.psi.PsiFile
 import java.awt.Font
+import java.util.concurrent.atomic.AtomicLong
 import javax.swing.JDialog
+import javax.swing.JPanel
 
 /**
  * JSON 编辑器对话框工具类（单例模式）
@@ -33,17 +35,20 @@ object JsonEditorDialog {
     /** 同步锁 */
     private val lock = Any()
 
-    /** PSI 文件（用于语法高亮等基于 PSI 的能力） */
-    @Volatile
-    private var psiFileInstance: PsiFile? = null
-
     /** 单元格选择监听器 */
     @Volatile
     private var cellMonitor: CellSelectionMonitor? = null
 
-    /** 当前项目实例 */
+    /** 原始 JSON 内容（未格式化，用于格式切换） */
     @Volatile
-    private var currentProject: Project? = null
+    private var originalJsonContent: String? = null
+
+    /** 当前格式是否为美化格式 */
+    @Volatile
+    private var isPrettyFormat: Boolean = true
+
+    /** 内容更新序列，避免异步任务乱序覆盖 */
+    private val contentUpdateSequence = AtomicLong(0)
 
     /**
      * 显示 JSON 编辑器对话框（单例模式）
@@ -64,7 +69,16 @@ object JsonEditorDialog {
             return
         }
 
-        val formattedJson = JsonFormatter.format(jsonContent.trim())
+        // 保存原始内容
+        val trimmedContent = jsonContent.trim()
+        originalJsonContent = trimmedContent
+        
+        // 根据当前格式选择格式化方法
+        val formattedJson = if (isPrettyFormat) {
+            JsonFormatter.formatPretty(trimmedContent)
+        } else {
+            JsonFormatter.formatCompact(trimmedContent)
+        }
 
         synchronized(lock) {
             // 再次检查项目是否已关闭（可能在等待锁时项目被关闭）
@@ -115,7 +129,10 @@ object JsonEditorDialog {
                 // 停止监听器
                 cellMonitor?.stop()
                 cellMonitor = null
-                currentProject = null
+                
+                // 重置状态
+                originalJsonContent = null
+                isPrettyFormat = true  // 重置为默认的美化格式
                 
                 disposeEditor()
                 dialogInstance = null
@@ -125,22 +142,65 @@ object JsonEditorDialog {
         try {
             val editor = createEditor(project, formattedJson, sourceFont)
             val scrollPane = DialogUtils.createScrollPane(editor)
+            
+            // 创建格式工具栏
+            val formatToolbar = DialogUtils.createFormatToolbar(
+                onFormatChange = { isPretty ->
+                    // 格式切换回调
+                    isPrettyFormat = isPretty
+                    originalJsonContent?.let { original ->
+                        val newFormatted = if (isPretty) {
+                            JsonFormatter.formatPretty(original)
+                        } else {
+                            JsonFormatter.formatCompact(original)
+                        }
+                        updateContent(project, newFormatted, sourceFont, editor)
+                    }
+                },
+                onExpandAll = {
+                    // 展开所有折叠
+                    JsonFoldingHelper.expandAll(editor)
+                },
+                onCollapseAll = {
+                    // 折叠所有
+                    JsonFoldingHelper.collapseAll(editor)
+                }
+            )
+            
             val searchToolbar = DialogUtils.createSearchToolbar(editor, dialog)
-            val mainPanel = DialogUtils.createMainPanel(scrollPane, searchToolbar)
+            searchToolbar.isVisible = false
+
+            val mainPanel = JPanel(java.awt.BorderLayout()).apply {
+                border = com.intellij.util.ui.JBUI.Borders.empty(10)
+                val topPanel = JPanel(java.awt.BorderLayout()).apply {
+                    add(formatToolbar, java.awt.BorderLayout.NORTH)
+                    add(searchToolbar, java.awt.BorderLayout.SOUTH)
+                }
+                add(topPanel, java.awt.BorderLayout.NORTH)
+                add(scrollPane, java.awt.BorderLayout.CENTER)
+            }
 
             dialog.contentPane = mainPanel
 
             // 保存单例引用
             dialogInstance = dialog
             editorInstance = editor
-            currentProject = project
 
             // 创建并启动单元格选择监听器
             cellMonitor = CellSelectionMonitor(project) { cellValue, font ->
                 // 自动更新内容
                 editorInstance?.let { ed ->
                     if (EditorUtils.isEditorValid(ed)) {
-                        val formatted = JsonFormatter.format(cellValue)
+                        // 保存原始内容
+                        val trimmed = cellValue.trim()
+                        originalJsonContent = trimmed
+                        
+                        // 根据当前格式偏好格式化
+                        val formatted = if (isPrettyFormat) {
+                            JsonFormatter.formatPretty(trimmed)
+                        } else {
+                            JsonFormatter.formatCompact(trimmed)
+                        }
                         updateContent(project, formatted, font, ed)
                     }
                 }
@@ -155,7 +215,6 @@ object JsonEditorDialog {
             // 如果创建编辑器失败，清理资源
             cellMonitor?.stop()
             cellMonitor = null
-            currentProject = null
             
             dialog.dispose()
             Messages.showErrorDialog(project, "创建 JSON 编辑器失败：${e.message}", "Show as JSON")
@@ -180,7 +239,6 @@ object JsonEditorDialog {
 
         // 创建 PSI 文件
         val psiFile = EditorUtils.createPsiFile(project, content)
-        psiFileInstance = psiFile
 
         // 获取或创建 Document
         val document = PsiDocumentManager.getInstance(project).getDocument(psiFile)
@@ -191,8 +249,11 @@ object JsonEditorDialog {
 
         // 创建并配置编辑器
         val editor = createEditorInstance(project, document, psiFile)
-        EditorUtils.configureBasicSettings(editor, project)
+        EditorUtils.configureBasicSettings(editor)
         sourceFont?.let { EditorUtils.applyFont(editor, it) }
+
+        // 设置 JSON 折叠功能
+        JsonFoldingHelper.setupFolding(editor, content)
 
         return editor
     }
@@ -249,6 +310,7 @@ object JsonEditorDialog {
             return
         }
 
+        val updateId = contentUpdateSequence.incrementAndGet()
         val document = editor.document
 
         ApplicationManager.getApplication().invokeLater {
@@ -256,16 +318,23 @@ object JsonEditorDialog {
             if (project.isDisposed || !EditorUtils.isEditorValid(editor)) {
                 return@invokeLater
             }
+            if (updateId != contentUpdateSequence.get()) {
+                return@invokeLater
+            }
 
             try {
                 WriteCommandAction.writeCommandAction(project).run<Throwable> {
-                    document.setText(formattedJson)
-                    psiFileInstance = EditorUtils.createPsiFile(project, formattedJson)
-                    PsiDocumentManager.getInstance(project).commitDocument(document)
+                    if (document.text != formattedJson) {
+                        document.setText(formattedJson)
+                        PsiDocumentManager.getInstance(project).commitDocument(document)
+                    }
                 }
 
                 if (EditorUtils.isEditorValid(editor)) {
                     sourceFont?.let { EditorUtils.applyFont(editor, it) }
+                    
+                    // 重新设置折叠功能
+                    JsonFoldingHelper.setupFolding(editor, formattedJson)
                 }
             } catch (e: Exception) {
                 // 如果更新失败（例如项目已关闭），忽略错误
@@ -288,7 +357,6 @@ object JsonEditorDialog {
                 }
             }
             editorInstance = null
-            psiFileInstance = null
         }
     }
 
@@ -316,7 +384,10 @@ object JsonEditorDialog {
                 // 停止监听器
                 cellMonitor?.stop()
                 cellMonitor = null
-                currentProject = null
+                
+                // 重置状态
+                originalJsonContent = null
+                isPrettyFormat = true  // 重置为默认的美化格式
 
                 // 释放编辑器资源
                 disposeEditor()

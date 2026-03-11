@@ -1,6 +1,6 @@
 # Show as JSON Plugin for DataGrip
 
-[![Version](https://img.shields.io/badge/version-1.0.12-blue.svg)](https://github.com/cyrnicolase/show-as-json-plugin)
+[![Version](https://img.shields.io/badge/version-1.0.13-blue.svg)](https://github.com/cyrnicolase/show-as-json-plugin)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![DataGrip](https://img.shields.io/badge/DataGrip-231%2B-orange.svg)](https://www.jetbrains.com/datagrip/)
 
@@ -16,6 +16,10 @@
 - ⌨️ **快捷键支持**：支持 `F7` 快捷键快速触发和关闭面板
 - 🎯 **只读模式**：编辑器为只读模式，防止误操作
 - 🔁 **Toggle 功能**：未选择单元格时按 `F7` 可关闭已打开的 JSON 面板
+- 🔀 **格式切换**：支持在美化格式和紧凑格式之间切换
+- 📁 **展开/折叠**：支持折叠和展开 JSON 对象和数组节点
+- 🔍 **搜索功能**：支持 `Cmd+F` / `Ctrl+F` 搜索 JSON 内容
+- 🔄 **自动更新**：选择新单元格时自动更新面板内容
 
 ## 系统要求
 
@@ -47,7 +51,7 @@ make build
 ./gradlew buildPlugin
 
 # 构建完成后，插件文件位于：
-# build/distributions/show-as-json-plugin-1.0.10.zip
+# build/distributions/show-as-json-plugin-1.0.13.zip
 ```
 
 ## 使用方法
@@ -67,7 +71,22 @@ make build
 
 - **F7**: 未选择单元格时，可关闭已打开的 JSON 面板
 - **ESC**: 关闭对话框
+- **Cmd+F / Ctrl+F**: 打开/关闭搜索工具栏
 - **滚动**: 支持正常的滚动速度，方便查看长 JSON 内容
+
+### 格式工具栏
+
+- **美化按钮**：将 JSON 格式化为带缩进的多行格式（默认）
+- **紧凑按钮**：将 JSON 格式化为单行紧凑格式
+- **全部展开按钮**：展开所有折叠的 JSON 节点
+- **全部折叠按钮**：折叠所有 JSON 对象和数组节点
+
+### 搜索功能
+
+- **Cmd+F / Ctrl+F**: 显示搜索工具栏
+- **上一个 / 下一个**: 导航到上一个或下一个匹配项
+- **高亮显示**: 自动高亮显示所有匹配项
+- **光标定位**: 自动选中并滚动到匹配的内容
 
 ## 开发指南
 
@@ -81,11 +100,13 @@ show-as-json-plugin/
 │       │   └── com/github/cyrnicolase/showasjson/
 │       │       ├── ShowAsJsonAction.kt      # Action 入口
 │       │       └── util/
-│       │           ├── CellValueExtractor.kt   # 单元格值提取
-│       │           ├── DialogUtils.kt          # 对话框工具类
-│       │           ├── EditorUtils.kt          # 编辑器工具类
-│       │           ├── JsonEditorDialog.kt      # JSON 编辑器对话框
-│       │           └── JsonFormatter.kt        # JSON 格式化
+│       │           ├── CellValueExtractor.kt      # 单元格值提取
+│       │           ├── CellSelectionMonitor.kt    # 单元格选择监听
+│       │           ├── DialogUtils.kt             # 对话框工具类
+│       │           ├── EditorUtils.kt             # 编辑器工具类
+│       │           ├── JsonEditorDialog.kt        # JSON 编辑器对话框
+│       │           ├── JsonFoldingHelper.kt       # JSON 折叠辅助
+│       │           └── JsonFormatter.kt           # JSON 格式化
 │       └── resources/
 │           └── META-INF/
 │               └── plugin.xml              # 插件配置
@@ -212,9 +233,20 @@ A: 支持 DataGrip 231 到 254.* 版本。
 
 ## 更新日志
 
+### 1.0.13 (最新)
+
+- ✅ **新增格式切换功能**：支持在美化格式和紧凑格式之间切换
+- ✅ **新增展开/折叠功能**：支持折叠和展开 JSON 对象和数组节点
+- ✅ **优化工具栏布局**：添加格式工具栏，提供更直观的操作界面
+- ✅ **自动折叠设置**：内容更新时自动重新设置折叠区域
+- ✅ **保留格式偏好**：会话期间保持用户选择的格式
+
 ### 1.0.12
 
 - ✅ 新增 F7 快捷键 toggle 功能：未选择单元格时按 F7 可关闭已打开的 show as json 面板
+- ✅ 新增搜索功能：支持 Cmd+F / Ctrl+F 搜索 JSON 内容
+- ✅ 新增自动更新功能：选择新单元格时自动更新面板内容
+- ✅ 修复 Base64 字符串显示问题
 - ✅ 优化代码结构，移除未使用的代码
 - ✅ 改进代码格式和可读性
 

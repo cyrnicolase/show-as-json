@@ -5,7 +5,7 @@ plugins {
 }
 
 group = "com.github.cyrnicolase"
-version = "1.0.12"
+version = "1.0.13"
 
 repositories {
     mavenCentral()
@@ -43,7 +43,7 @@ tasks {
     }
 
     patchPluginXml {
-        sinceBuild.set("231")
+        sinceBuild.set("233")
         untilBuild.set("254.*")  // 支持 DataGrip 253 及更高版本
     }
 

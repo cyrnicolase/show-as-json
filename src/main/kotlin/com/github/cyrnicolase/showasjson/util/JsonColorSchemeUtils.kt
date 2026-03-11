@@ -1,6 +1,5 @@
 package com.github.cyrnicolase.showasjson.util
 
-import com.intellij.openapi.editor.Editor
 import com.intellij.openapi.editor.colors.EditorColorsScheme
 import com.intellij.openapi.editor.colors.TextAttributesKey
 import com.intellij.openapi.editor.markup.TextAttributes

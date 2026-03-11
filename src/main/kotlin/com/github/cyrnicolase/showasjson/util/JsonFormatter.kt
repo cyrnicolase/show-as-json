@@ -6,38 +6,40 @@ import com.google.gson.JsonParser
 /**
  * JSON 格式化工具类
  *
- * 提供 JSON 字符串的格式化功能，将压缩的 JSON 字符串格式化为可读的多行格式。
+ * 提供 JSON 字符串的格式化功能，支持美化格式和紧凑格式。
  *
  * @author cyrnicolase
  */
 object JsonFormatter {
-    /** Gson 实例（缓存，避免重复创建） */
-    private val gson = GsonBuilder()
-        .setPrettyPrinting()      // 启用美化输出
-        .setLenient()              // 允许宽松的 JSON 解析
-        .disableHtmlEscaping()     // 禁用 HTML 转义，保持原始字符串（如 base64 中的 =）
+    private val prettyGson = GsonBuilder()
+        .setPrettyPrinting()
+        .setLenient()
+        .disableHtmlEscaping()
+        .create()
+
+    private val compactGson = GsonBuilder()
+        .setLenient()
+        .disableHtmlEscaping()
         .create()
 
     /**
-     * 格式化 JSON 字符串
-     *
-     * 将输入的 JSON 字符串解析并格式化为带缩进的多行格式。
-     * 如果格式化失败（例如 JSON 格式错误），则返回原始字符串。
-     *
-     * @param jsonString 原始 JSON 字符串（可以是压缩格式）
-     * @return 格式化后的 JSON 字符串，如果格式化失败则返回原始字符串
+     * 美化格式化 JSON 字符串（带缩进换行）。
+     * 如果解析失败，返回原始字符串。
      */
-    fun format(jsonString: String): String {
-        if (jsonString.isBlank()) {
-            return jsonString
-        }
+    fun formatPretty(jsonString: String): String = format(jsonString, pretty = true)
 
+    /**
+     * 紧凑格式化 JSON 字符串（单行无多余空格）。
+     * 如果解析失败，返回原始字符串。
+     */
+    fun formatCompact(jsonString: String): String = format(jsonString, pretty = false)
+
+    private fun format(jsonString: String, pretty: Boolean): String {
+        if (jsonString.isBlank()) return jsonString
         return try {
-            val trimmed = jsonString.trim()
-            val jsonElement = JsonParser.parseString(trimmed)
-            gson.toJson(jsonElement)
+            val element = JsonParser.parseString(jsonString.trim())
+            if (pretty) prettyGson.toJson(element) else compactGson.toJson(element)
         } catch (e: Exception) {
-            // 如果解析失败，返回原始字符串
             jsonString
         }
     }

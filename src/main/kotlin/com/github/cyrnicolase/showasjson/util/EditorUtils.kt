@@ -78,9 +78,8 @@ internal object EditorUtils {
      * 配置编辑器基本设置
      *
      * @param editor 编辑器实例
-     * @param project 项目实例（用于重新高亮）
      */
-    fun configureBasicSettings(editor: Editor, project: Project) {
+    fun configureBasicSettings(editor: Editor) {
         // 设置只读模式（仅 EditorEx 支持 setViewer）
         // 注意：即使设置为 viewer 模式，Ctrl+F 搜索功能仍然可用
         val editorEx = editor as? EditorEx
@@ -93,34 +92,16 @@ internal object EditorUtils {
             isUseSoftWraps = false         // 不使用软换行
         }
 
-        // 创建自定义配色方案并应用
-        try {
-            if (editorEx != null) {
-                // 获取全局配色方案
-                val globalScheme = EditorColorsManager.getInstance().globalScheme
-                // 创建可修改的副本
-                val customScheme = globalScheme.clone() as EditorColorsScheme
+        // 应用增强的 JSON 配色方案
+        if (editorEx != null) {
+            try {
+                val customScheme = EditorColorsManager.getInstance().globalScheme.clone() as EditorColorsScheme
                 customScheme.name = "JSON Viewer Custom Scheme"
-                
-                // 应用增强的 JSON 配色到自定义方案
                 JsonColorSchemeUtils.enhanceJsonColors(customScheme)
-                
-                // 将自定义方案设置到编辑器
                 editorEx.colorsScheme = customScheme
+            } catch (e: Exception) {
+                // 配色设置失败时使用默认配色
             }
-        } catch (e: Exception) {
-            // 如果自定义配色失败，使用默认配色
-        }
-        
-        // 重新高亮文档以应用新的配色
-        try {
-            val document = editor.document
-            val psiFile = PsiDocumentManager.getInstance(project).getPsiFile(document)
-            if (psiFile != null) {
-                PsiDocumentManager.getInstance(project).commitDocument(document)
-            }
-        } catch (e: Exception) {
-            // 忽略重新高亮错误
         }
     }
 
