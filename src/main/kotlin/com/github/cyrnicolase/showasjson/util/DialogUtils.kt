@@ -92,16 +92,18 @@ internal object DialogUtils {
     }
 
     /**
-     * 创建格式工具栏（美化/紧凑切换、全部展开/折叠）
+     * 创建格式工具栏（美化/紧凑切换、全部展开/折叠、复制）
      *
      * @param onFormatChange  格式切换回调，参数 isPretty
      * @param onExpandAll     全部展开回调
      * @param onCollapseAll   全部折叠回调
+     * @param onCopy          复制当前面板内容到剪贴板
      */
     fun createFormatToolbar(
         onFormatChange: (isPretty: Boolean) -> Unit,
         onExpandAll: () -> Unit,
-        onCollapseAll: () -> Unit
+        onCollapseAll: () -> Unit,
+        onCopy: () -> Unit
     ): JPanel {
         var isPrettyFormat = true
 
@@ -138,6 +140,10 @@ internal object DialogUtils {
             toolTipText = "折叠所有 JSON 对象和数组"
             addActionListener { onCollapseAll() }
         }
+        val copyButton = JButton("复制").apply {
+            toolTipText = "将当前面板中的 JSON 复制到剪贴板"
+            addActionListener { onCopy() }
+        }
 
         return JPanel(FlowLayout(FlowLayout.LEFT, 5, 5)).apply {
             add(JLabel("格式:"))
@@ -146,6 +152,8 @@ internal object DialogUtils {
             add(JLabel("  |  ").apply { foreground = JBColor.GRAY })
             add(expandButton)
             add(collapseButton)
+            add(JLabel("  |  ").apply { foreground = JBColor.GRAY })
+            add(copyButton)
         }
     }
 

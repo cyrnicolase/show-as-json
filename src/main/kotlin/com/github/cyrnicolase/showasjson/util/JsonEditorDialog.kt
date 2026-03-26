@@ -6,11 +6,13 @@ import com.intellij.openapi.editor.Document
 import com.intellij.openapi.editor.Editor
 import com.intellij.openapi.editor.EditorFactory
 import com.intellij.openapi.fileTypes.FileTypeManager
+import com.intellij.openapi.ide.CopyPasteManager
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.Messages
 import com.intellij.psi.PsiDocumentManager
 import com.intellij.psi.PsiFile
 import java.awt.Font
+import java.awt.datatransfer.StringSelection
 import java.util.concurrent.atomic.AtomicLong
 import javax.swing.JDialog
 import javax.swing.JPanel
@@ -168,6 +170,12 @@ object JsonEditorDialog {
                 onCollapseAll = {
                     // 折叠所有
                     JsonFoldingHelper.collapseAll(editor)
+                },
+                onCopy = {
+                    if (EditorUtils.isEditorValid(editor)) {
+                        CopyPasteManager.getInstance()
+                            .setContents(StringSelection(editor.document.text))
+                    }
                 }
             )
             

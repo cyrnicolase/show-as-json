@@ -1,6 +1,6 @@
 # Show as JSON Plugin for DataGrip
 
-[![Version](https://img.shields.io/badge/version-1.0.13-blue.svg)](https://github.com/cyrnicolase/show-as-json-plugin)
+[![Version](https://img.shields.io/badge/version-1.0.14-blue.svg)](https://github.com/cyrnicolase/show-as-json-plugin)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![DataGrip](https://img.shields.io/badge/DataGrip-231%2B-orange.svg)](https://www.jetbrains.com/datagrip/)
 
@@ -18,6 +18,7 @@
 - 🔁 **Toggle 功能**：未选择单元格时按 `F7` 可关闭已打开的 JSON 面板
 - 🔀 **格式切换**：支持在美化格式和紧凑格式之间切换
 - 📁 **展开/折叠**：支持折叠和展开 JSON 对象和数组节点
+- 📋 **复制**：工具栏「复制」可将当前面板 JSON 复制到剪贴板
 - 🔍 **搜索功能**：支持 `Cmd+F` / `Ctrl+F` 搜索 JSON 内容
 - 🔄 **自动更新**：选择新单元格时自动更新面板内容
 
@@ -51,7 +52,7 @@ make build
 ./gradlew buildPlugin
 
 # 构建完成后，插件文件位于：
-# build/distributions/show-as-json-plugin-1.0.13.zip
+# build/distributions/show-as-json-plugin-1.0.14.zip
 ```
 
 ## 使用方法
@@ -80,6 +81,7 @@ make build
 - **紧凑按钮**：将 JSON 格式化为单行紧凑格式
 - **全部展开按钮**：展开所有折叠的 JSON 节点
 - **全部折叠按钮**：折叠所有 JSON 对象和数组节点
+- **复制按钮**：将当前面板中的 JSON 复制到系统剪贴板
 
 ### 搜索功能
 
@@ -233,7 +235,11 @@ A: 支持 DataGrip 231 到 254.* 版本。
 
 ## 更新日志
 
-### 1.0.13 (最新)
+### 1.0.14 (最新)
+
+- ✅ **复制**：工具栏「复制」按钮，将当前面板 JSON 复制到剪贴板
+
+### 1.0.13
 
 - ✅ **新增格式切换功能**：支持在美化格式和紧凑格式之间切换
 - ✅ **新增展开/折叠功能**：支持折叠和展开 JSON 对象和数组节点
