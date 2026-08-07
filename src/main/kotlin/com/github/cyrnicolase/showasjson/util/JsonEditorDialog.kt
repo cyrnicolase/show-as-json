@@ -280,6 +280,7 @@ object JsonEditorDialog {
 
         // 设置 JSON 折叠功能
         JsonFoldingHelper.setupFolding(editor, content)
+        JsonPropertyKeyHighlighter.apply(editor, content)
 
         return editor
     }
@@ -361,6 +362,7 @@ object JsonEditorDialog {
                     
                     // 重新设置折叠功能
                     JsonFoldingHelper.setupFolding(editor, formattedJson)
+                    JsonPropertyKeyHighlighter.apply(editor, formattedJson)
                 }
             } catch (e: Exception) {
                 // 如果更新失败（例如项目已关闭），忽略错误
@@ -376,6 +378,7 @@ object JsonEditorDialog {
             editorInstance?.let { editor ->
                 try {
                     if (EditorUtils.isEditorValid(editor)) {
+                        JsonPropertyKeyHighlighter.clear(editor)
                         EditorFactory.getInstance().releaseEditor(editor)
                     }
                 } catch (e: Exception) {

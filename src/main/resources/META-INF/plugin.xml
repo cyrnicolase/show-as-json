@@ -1,7 +1,7 @@
 <idea-plugin>
     <id>com.github.cyrnicolase.show-as-json</id>
     <name>Show as JSON</name>
-    <version>1.0.16</version>
+    <version>1.0.18</version>
     <vendor email="" url="https://github.com/cyrnicolase">cyrnicolase</vendor>
 
     <description><![CDATA[
@@ -14,6 +14,13 @@
     ]]></description>
 
     <change-notes><![CDATA[
+    <h3>1.0.18</h3>
+    <ul>
+        <li>重构：JSON 配色改为单核心流水线，统一语义映射、调色、应用与回退策略</li>
+        <li>修复：避免 BOOLEAN 与 NULL 在共享关键字 key 下发生颜色覆盖，提升渲染稳定性</li>
+        <li>优化：放宽必选命中门槛为 PROPERTY_KEY + STRING，减少跨版本/主题下的误回退</li>
+        <li>优化：仅在全回退或异常路径输出 debug 摘要日志，降低常规路径噪音</li>
+    </ul>
     <h3>1.0.16</h3>
     <ul>
         <li>优化：大文本搜索改为异步执行，增加防抖与高亮数量上限，降低 UI 卡顿风险</li>

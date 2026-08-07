@@ -1,201 +1,423 @@
 package com.github.cyrnicolase.showasjson.util
 
+import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.editor.colors.EditorColorsScheme
 import com.intellij.openapi.editor.colors.TextAttributesKey
 import com.intellij.openapi.editor.markup.TextAttributes
 import com.intellij.ui.ColorUtil
 import java.awt.Color
 import java.awt.Font
+import kotlin.math.abs
+import kotlin.math.roundToInt
 
 /**
- * JSON 配色方案增强工具类
+ * JSON 配色方案增强工具类（单核心流水线）
  *
- * 为 JSON 编辑器提供丰富的配色方案，增强不同 JSON 元素的视觉区分度。
- * 支持明亮和暗黑主题自适应。
+ * 设计目标：
+ * 1) 主题跟随优先：从当前主题色出发进行轻量偏移，而不是硬编码固定配色。
+ * 2) 命中可观测：统计 token/key 命中数量，避免“设置成功但实际未生效”的静默问题。
+ * 3) 二档回退：不满足必选语义命中时全回退，满足时正常应用。
+ * 4) 样式完整：仅增量覆盖前景色，避免覆盖已有背景/效果线等样式。
  *
- * @author cyrnicolase
+ * 主题切换说明：
+ * 当前配色仅在编辑器创建时应用。切换 IDE 主题后需重开 JSON 面板生效。
  */
 object JsonColorSchemeUtils {
-    
+    private val LOG = Logger.getInstance(JsonColorSchemeUtils::class.java)
+    private const val SLOW_APPLY_THRESHOLD_MS = 5.0
+    private const val MIN_KEY_STRING_LUMA_DIFF = 22
+    private const val MIN_STRING_NUMBER_LUMA_DIFF = 18
+    private const val MIN_BG_LUMA_DIFF = 70
+
+    private enum class JsonSemanticToken(val keyNames: List<String>) {
+        PROPERTY_KEY(
+            listOf(
+                "JSON.PROPERTY_KEY",
+                "JSON_PROPERTY_KEY",
+                "JSON:PROPERTY_KEY",
+            )
+        ),
+        STRING(
+            listOf(
+                "JSON.STRING",
+                "JSON_STRING",
+                "JSON:STRING",
+            )
+        ),
+        NUMBER(
+            listOf(
+                "JSON.NUMBER",
+                "JSON_NUMBER",
+                "JSON:NUMBER",
+            )
+        ),
+        BOOLEAN(
+            listOf(
+                "JSON.BOOLEAN",
+                "JSON_BOOLEAN",
+                "JSON:BOOLEAN",
+                "JSON.KEYWORD",
+                "JSON_KEYWORD",
+                "JSON:KEYWORD",
+            )
+        ),
+        NULL(
+            listOf(
+                "JSON.NULL",
+                "JSON_NULL",
+                "JSON:NULL",
+                "JSON.KEYWORD",
+                "JSON_KEYWORD",
+                "JSON:KEYWORD",
+            )
+        ),
+        BRACKETS(
+            listOf(
+                "JSON.BRACES",
+                "JSON_BRACES",
+                "JSON:BRACES",
+                "JSON.BRACKETS",
+                "JSON_BRACKETS",
+                "JSON:BRACKETS"
+            )
+        ),
+        PUNCTUATION(
+            listOf(
+                "JSON.COMMA",
+                "JSON_COMMA",
+                "JSON:COMMA",
+                "JSON.COLON",
+                "JSON_COLON",
+                "JSON:COLON"
+            )
+        );
+    }
+
+    private data class Palette(
+        val key: Color,
+        val string: Color,
+        val number: Color,
+        val boolean: Color,
+        val nullValue: Color,
+        val brackets: Color,
+        val punctuation: Color
+    )
+
+    data class EnhanceResult(
+        val matchedTokenCount: Int,
+        val matchedKeyCount: Int,
+        val appliedKeyCount: Int,
+        val mandatorySemanticMatched: Boolean,
+        val elapsedMs: Double
+    )
+
     /**
      * 增强 JSON 配色方案
      *
-     * 根据当前主题（明亮/暗黑）为不同的 JSON 元素设置合适的颜色。
-     * 直接修改传入的配色方案对象。
+     * 必选语义命中条件：
+     * - PROPERTY_KEY >= 1
+     * - STRING >= 1
+     *
+     * 若不满足条件，则全回退（不写入任何 attributes），保证行为确定性。
+     * 注意：值类型（NUMBER/BOOLEAN/NULL）不作为强制门槛，避免跨版本 key 差异导致整体验证失败。
+     *
+     * key 解析策略：
+     * - 使用 TextAttributesKey.find 解析 key
+     * - 仅将“当前 scheme 或默认定义里具备可用属性”的 key 计为命中，避免统计失真
      *
      * @param scheme 编辑器配色方案（必须是可修改的副本）
+     * @return 命中和应用统计信息
      */
-    fun enhanceJsonColors(scheme: EditorColorsScheme) {
+    fun enhanceJsonColors(scheme: EditorColorsScheme): EnhanceResult {
+        val startedAtNs = System.nanoTime()
+        var result = EnhanceResult(0, 0, 0, mandatorySemanticMatched = false, elapsedMs = 0.0)
+
         try {
-            val isDark = ColorUtil.isDark(scheme.defaultBackground)
-            
-            // 为不同的 JSON 元素设置颜色
-            setJsonPropertyKeyColor(scheme, isDark)
-            setJsonStringColor(scheme, isDark)
-            setJsonNumberColor(scheme, isDark)
-            setJsonKeywordColor(scheme, isDark)
-            setJsonBracesColor(scheme, isDark)
-            setJsonCommaColor(scheme, isDark)
-        } catch (e: Exception) {
-            // 如果配色设置失败，使用默认配色，不影响功能
-        }
-    }
-    
-    /**
-     * 设置 JSON 属性键的颜色
-     *
-     * 明亮主题：鲜艳蓝色 - 醒目突出
-     * 暗黑主题：明亮紫蓝色 - 高对比度
-     */
-    private fun setJsonPropertyKeyColor(scheme: EditorColorsScheme, isDark: Boolean) {
-        val color = if (isDark) {
-            Color(180, 140, 255)  // #B48CFF - 明亮紫蓝色
-        } else {
-            Color(0, 80, 255)      // #0050FF - 鲜艳蓝色
-        }
-        
-        setColorForKeys(scheme, color, Font.BOLD, listOf(
-            "JSON:PROPERTY_KEY",
-            "JSON.PROPERTY_KEY"
-        ))
-    }
-    
-    /**
-     * 设置 JSON 字符串的颜色
-     *
-     * 明亮主题：鲜艳绿色 - 醒目突出
-     * 暗黑主题：明亮绿色 - 清晰可见
-     */
-    private fun setJsonStringColor(scheme: EditorColorsScheme, isDark: Boolean) {
-        val color = if (isDark) {
-            Color(152, 195, 121)   // #98C379 - 明亮绿色
-        } else {
-            Color(34, 139, 34)     // #228B22 - 鲜艳绿色
-        }
-        
-        setColorForKeys(scheme, color, Font.PLAIN, listOf(
-            "JSON:STRING",
-            "JSON.STRING"
-        ))
-    }
-    
-    /**
-     * 设置 JSON 数字的颜色
-     *
-     * 明亮主题：明亮青蓝色 - 数值突出
-     * 暗黑主题：鲜艳天蓝色 - 高对比度
-     */
-    private fun setJsonNumberColor(scheme: EditorColorsScheme, isDark: Boolean) {
-        val color = if (isDark) {
-            Color(86, 182, 194)    // #56B6C2 - 鲜艳天蓝色
-        } else {
-            Color(0, 119, 170)     // #0077AA - 明亮青蓝色
-        }
-        
-        setColorForKeys(scheme, color, Font.PLAIN, listOf(
-            "JSON:NUMBER",
-            "JSON.NUMBER"
-        ))
-    }
-    
-    /**
-     * 设置 JSON 关键字的颜色（true, false, null）
-     *
-     * 明亮主题：鲜艳紫红色 - 关键字突出
-     * 暗黑主题：明亮橙色 - 特殊值醒目
-     */
-    private fun setJsonKeywordColor(scheme: EditorColorsScheme, isDark: Boolean) {
-        val color = if (isDark) {
-            Color(229, 192, 123)   // #E5C07B - 明亮金橙色
-        } else {
-            Color(170, 13, 145)    // #AA0D91 - 鲜艳紫红色
-        }
-        
-        setColorForKeys(scheme, color, Font.BOLD, listOf(
-            "JSON:KEYWORD",
-            "JSON.KEYWORD",
-            "JSON:NULL",
-            "JSON.NULL",
-            "JSON:BOOLEAN",
-            "JSON.BOOLEAN"
-        ))
-    }
-    
-    /**
-     * 设置 JSON 花括号和方括号的颜色
-     *
-     * 明亮主题：深灰色 - 结构清晰
-     * 暗黑主题：明亮灰色 - 清晰可见
-     */
-    private fun setJsonBracesColor(scheme: EditorColorsScheme, isDark: Boolean) {
-        val color = if (isDark) {
-            Color(198, 208, 218)   // #C6D0DA - 明亮灰色
-        } else {
-            Color(80, 80, 80)      // #505050 - 深灰色
-        }
-        
-        setColorForKeys(scheme, color, Font.PLAIN, listOf(
-            "JSON:BRACES",
-            "JSON.BRACES",
-            "JSON:BRACKETS",
-            "JSON.BRACKETS"
-        ))
-    }
-    
-    /**
-     * 设置 JSON 逗号和冒号的颜色
-     *
-     * 明亮主题：灰色 - 分隔清晰
-     * 暗黑主题：明亮灰色 - 清晰可见
-     */
-    private fun setJsonCommaColor(scheme: EditorColorsScheme, isDark: Boolean) {
-        val color = if (isDark) {
-            Color(198, 208, 218)   // #C6D0DA - 明亮灰色
-        } else {
-            Color(100, 100, 100)   // #646464 - 中灰色
-        }
-        
-        setColorForKeys(scheme, color, Font.PLAIN, listOf(
-            "JSON:COMMA",
-            "JSON.COMMA",
-            "JSON:COLON",
-            "JSON.COLON"
-        ))
-    }
-    
-    /**
-     * 为指定的 TextAttributesKey 设置颜色
-     *
-     * 使用 TextAttributesKey.createTextAttributesKey 来获取或创建 key，
-     * 并直接设置到 scheme 中。这样可以确保配色被正确应用。
-     *
-     * @param scheme 编辑器颜色方案
-     * @param color 前景色
-     * @param fontType 字体样式（普通/粗体/斜体）
-     * @param keyNames TextAttributesKey 的名称列表
-     */
-    private fun setColorForKeys(
-        scheme: EditorColorsScheme,
-        color: Color,
-        fontType: Int,
-        keyNames: List<String>
-    ) {
-        for (keyName in keyNames) {
-            try {
-                // 使用 createTextAttributesKey 获取或创建 key
-                // 如果 key 已存在，会返回已存在的实例
-                val key = TextAttributesKey.createTextAttributesKey(keyName)
-                
-                // 创建新的 TextAttributes 或克隆现有的
-                val attributes = TextAttributes()
-                attributes.foregroundColor = color
-                attributes.fontType = fontType
-                
-                // 设置到 scheme 中
-                scheme.setAttributes(key, attributes)
-            } catch (e: Exception) {
-                // 如果某个 key 设置失败，继续尝试其他的
+            val resolvedKeys = resolveCandidateKeys(scheme)
+            val matchedTokenCount = resolvedKeys.count { it.value.isNotEmpty() }
+            val matchedKeyCount = resolvedKeys.values.sumOf { it.size }
+            val mandatoryMatched = isMandatorySemanticMatched(resolvedKeys)
+
+            if (!mandatoryMatched) {
+                result = EnhanceResult(
+                    matchedTokenCount = matchedTokenCount,
+                    matchedKeyCount = matchedKeyCount,
+                    appliedKeyCount = 0,
+                    mandatorySemanticMatched = false,
+                    elapsedMs = elapsedMsSince(startedAtNs)
+                )
+                logFallbackIfNeeded(result, reason = "missing mandatory semantic keys")
+                return result
             }
+
+            val palette = buildPalette(scheme, resolvedKeys)
+            val appliedKeyCount = applyPalette(scheme, resolvedKeys, palette)
+            result = EnhanceResult(
+                matchedTokenCount = matchedTokenCount,
+                matchedKeyCount = matchedKeyCount,
+                appliedKeyCount = appliedKeyCount,
+                mandatorySemanticMatched = true,
+                elapsedMs = elapsedMsSince(startedAtNs)
+            )
+            logSlowIfNeeded(result)
+            return result
+        } catch (e: Exception) {
+            result = result.copy(elapsedMs = elapsedMsSince(startedAtNs))
+            if (LOG.isDebugEnabled) {
+                LOG.debug(
+                    "JSON color enhance failed. matchedTokens=${result.matchedTokenCount}, " +
+                        "matchedKeys=${result.matchedKeyCount}, appliedKeys=${result.appliedKeyCount}, " +
+                        "elapsedMs=${"%.2f".format(result.elapsedMs)}",
+                    e
+                )
+            }
+            return result
+        }
+    }
+
+    private fun resolveCandidateKeys(
+        scheme: EditorColorsScheme
+    ): Map<JsonSemanticToken, List<TextAttributesKey>> {
+        val claimedKeyNames = mutableSetOf<String>()
+        val resolved = linkedMapOf<JsonSemanticToken, List<TextAttributesKey>>()
+
+        for (token in JsonSemanticToken.values()) {
+            val keys = token.keyNames
+                .map { keyName -> TextAttributesKey.find(keyName) }
+                .distinctBy { it.externalName }
+                .filter { key -> hasUsableAttributes(scheme, key) }
+                .filter { key -> claimedKeyNames.add(key.externalName) }
+            resolved[token] = keys
+        }
+
+        return resolved
+    }
+
+    private fun hasUsableAttributes(scheme: EditorColorsScheme, key: TextAttributesKey): Boolean {
+        val attrs = scheme.getAttributes(key) ?: key.defaultAttributes ?: return false
+        return attrs.foregroundColor != null ||
+            attrs.backgroundColor != null ||
+            attrs.effectColor != null ||
+            attrs.errorStripeColor != null ||
+            attrs.fontType != Font.PLAIN
+    }
+
+    private fun isMandatorySemanticMatched(
+        resolvedKeys: Map<JsonSemanticToken, List<TextAttributesKey>>
+    ): Boolean {
+        val keyMatched = resolvedKeys[JsonSemanticToken.PROPERTY_KEY].orEmpty().isNotEmpty()
+        val stringMatched = resolvedKeys[JsonSemanticToken.STRING].orEmpty().isNotEmpty()
+        return keyMatched && stringMatched
+    }
+
+    private fun buildPalette(
+        scheme: EditorColorsScheme,
+        resolvedKeys: Map<JsonSemanticToken, List<TextAttributesKey>>
+    ): Palette {
+        val background = scheme.defaultBackground
+        val defaultForeground = scheme.defaultForeground
+        val isDark = ColorUtil.isDark(background)
+
+        val keyBase = resolveTokenColor(
+            scheme,
+            resolvedKeys[JsonSemanticToken.PROPERTY_KEY].orEmpty(),
+            if (isDark) Color(200, 140, 255) else Color(142, 53, 180)
+        )
+        val stringBase = resolveTokenColor(
+            scheme,
+            resolvedKeys[JsonSemanticToken.STRING].orEmpty(),
+            if (isDark) Color(136, 226, 114) else Color(20, 128, 52)
+        )
+        val numberBase = resolveTokenColor(
+            scheme,
+            resolvedKeys[JsonSemanticToken.NUMBER].orEmpty(),
+            if (isDark) Color(255, 188, 111) else Color(176, 98, 0)
+        )
+        val booleanBase = resolveTokenColor(
+            scheme,
+            resolvedKeys[JsonSemanticToken.BOOLEAN].orEmpty(),
+            if (isDark) Color(120, 210, 255) else Color(0, 116, 179)
+        )
+        val nullBase = resolveTokenColor(
+            scheme,
+            resolvedKeys[JsonSemanticToken.NULL].orEmpty(),
+            if (isDark) Color(255, 145, 199) else Color(176, 42, 125)
+        )
+        // 主题跟随 + 语义偏色：保留主题协调性的同时，让不同 token 的色相差异更可见。
+        val keyTinted = blendTowardAccent(keyBase, if (isDark) Color(200, 140, 255) else Color(142, 53, 180), 0.72)
+        val stringTinted = blendTowardAccent(stringBase, if (isDark) Color(136, 226, 114) else Color(20, 128, 52), 0.52)
+        val numberTinted = blendTowardAccent(numberBase, if (isDark) Color(255, 188, 111) else Color(176, 98, 0), 0.65)
+        val booleanTinted = blendTowardAccent(booleanBase, if (isDark) Color(120, 210, 255) else Color(0, 116, 179), 0.62)
+        val nullTinted = blendTowardAccent(nullBase, if (isDark) Color(255, 145, 199) else Color(176, 42, 125), 0.62)
+        val punctuationBase = mix(defaultForeground, background, 0.35)
+        val bracketBase = mix(defaultForeground, background, 0.42)
+
+        val keyWithBg = ensureBgContrast(keyTinted, background, MIN_BG_LUMA_DIFF)
+        val stringWithBg = ensureBgContrast(stringTinted, background, MIN_BG_LUMA_DIFF)
+        val numberWithBg = ensureBgContrast(numberTinted, background, MIN_BG_LUMA_DIFF)
+        val booleanWithBg = ensureBgContrast(booleanTinted, background, MIN_BG_LUMA_DIFF)
+        val nullWithBg = ensureBgContrast(nullTinted, background, MIN_BG_LUMA_DIFF)
+        val punctuationWithBg = ensureBgContrast(punctuationBase, background, MIN_BG_LUMA_DIFF - 20)
+        val bracketWithBg = ensureBgContrast(bracketBase, background, MIN_BG_LUMA_DIFF - 20)
+
+        val adjustedKey = ensureTokenLumaDistance(
+            keyWithBg,
+            stringWithBg,
+            MIN_KEY_STRING_LUMA_DIFF,
+            background
+        )
+        val adjustedNumber = ensureTokenLumaDistance(
+            numberWithBg,
+            stringWithBg,
+            MIN_STRING_NUMBER_LUMA_DIFF,
+            background
+        )
+
+        return Palette(
+            key = adjustedKey,
+            string = stringWithBg,
+            number = adjustedNumber,
+            boolean = booleanWithBg,
+            nullValue = nullWithBg,
+            brackets = bracketWithBg,
+            punctuation = punctuationWithBg
+        )
+    }
+
+    private fun resolveTokenColor(
+        scheme: EditorColorsScheme,
+        keys: List<TextAttributesKey>,
+        fallback: Color
+    ): Color {
+        for (key in keys) {
+            val color = scheme.getAttributes(key)?.foregroundColor ?: key.defaultAttributes?.foregroundColor
+            if (color != null) return color
+        }
+        return fallback
+    }
+
+    private fun applyPalette(
+        scheme: EditorColorsScheme,
+        resolvedKeys: Map<JsonSemanticToken, List<TextAttributesKey>>,
+        palette: Palette
+    ): Int {
+        var appliedKeyCount = 0
+        for ((token, keys) in resolvedKeys) {
+            if (keys.isEmpty()) continue
+            val targetColor = targetColorForToken(token, palette)
+            for (key in keys) {
+                val current = scheme.getAttributes(key) ?: key.defaultAttributes ?: TextAttributes()
+                val updated = current.clone()
+                updated.foregroundColor = targetColor
+                if (token == JsonSemanticToken.PROPERTY_KEY) {
+                    updated.fontType = Font.BOLD
+                }
+                scheme.setAttributes(key, updated)
+                appliedKeyCount++
+            }
+        }
+        return appliedKeyCount
+    }
+
+    private fun targetColorForToken(token: JsonSemanticToken, palette: Palette): Color {
+        return when (token) {
+            JsonSemanticToken.PROPERTY_KEY -> palette.key
+            JsonSemanticToken.STRING -> palette.string
+            JsonSemanticToken.NUMBER -> palette.number
+            JsonSemanticToken.BOOLEAN -> palette.boolean
+            JsonSemanticToken.NULL -> palette.nullValue
+            JsonSemanticToken.BRACKETS -> palette.brackets
+            JsonSemanticToken.PUNCTUATION -> palette.punctuation
+        }
+    }
+
+    private fun ensureBgContrast(color: Color, background: Color, minDiff: Int): Color {
+        var candidate = color
+        var attempts = 0
+        while (abs(luma(candidate) - luma(background)) < minDiff && attempts < 12) {
+            candidate = if (ColorUtil.isDark(background)) {
+                shiftTowards(candidate, Color.WHITE, 0.14)
+            } else {
+                shiftTowards(candidate, Color.BLACK, 0.14)
+            }
+            attempts++
+        }
+        return candidate
+    }
+
+    private fun ensureTokenLumaDistance(
+        tokenColor: Color,
+        referenceColor: Color,
+        minDiff: Int,
+        background: Color
+    ): Color {
+        var candidate = tokenColor
+        var attempts = 0
+        while (abs(luma(candidate) - luma(referenceColor)) < minDiff && attempts < 12) {
+            candidate = if (ColorUtil.isDark(background)) {
+                shiftTowards(candidate, Color.WHITE, 0.12)
+            } else {
+                shiftTowards(candidate, Color.BLACK, 0.12)
+            }
+            attempts++
+        }
+        return ensureBgContrast(candidate, background, MIN_BG_LUMA_DIFF)
+    }
+
+    private fun mix(foreground: Color, background: Color, backgroundRatio: Double): Color {
+        val clamped = backgroundRatio.coerceIn(0.0, 1.0)
+        val fgRatio = 1.0 - clamped
+        return Color(
+            (foreground.red * fgRatio + background.red * clamped).roundToInt().coerceIn(0, 255),
+            (foreground.green * fgRatio + background.green * clamped).roundToInt().coerceIn(0, 255),
+            (foreground.blue * fgRatio + background.blue * clamped).roundToInt().coerceIn(0, 255)
+        )
+    }
+
+    private fun blendTowardAccent(base: Color, accent: Color, accentWeight: Double): Color {
+        val clamped = accentWeight.coerceIn(0.0, 1.0)
+        val baseWeight = 1.0 - clamped
+        return Color(
+            (base.red * baseWeight + accent.red * clamped).roundToInt().coerceIn(0, 255),
+            (base.green * baseWeight + accent.green * clamped).roundToInt().coerceIn(0, 255),
+            (base.blue * baseWeight + accent.blue * clamped).roundToInt().coerceIn(0, 255)
+        )
+    }
+
+    private fun shiftTowards(color: Color, target: Color, ratio: Double): Color {
+        val clamped = ratio.coerceIn(0.0, 1.0)
+        return Color(
+            (color.red + (target.red - color.red) * clamped).roundToInt().coerceIn(0, 255),
+            (color.green + (target.green - color.green) * clamped).roundToInt().coerceIn(0, 255),
+            (color.blue + (target.blue - color.blue) * clamped).roundToInt().coerceIn(0, 255)
+        )
+    }
+
+    private fun luma(color: Color): Int {
+        return (0.299 * color.red + 0.587 * color.green + 0.114 * color.blue).roundToInt()
+    }
+
+    private fun elapsedMsSince(startNs: Long): Double {
+        return (System.nanoTime() - startNs) / 1_000_000.0
+    }
+
+    private fun logFallbackIfNeeded(result: EnhanceResult, reason: String) {
+        if (!LOG.isDebugEnabled) return
+        LOG.debug(
+            "JSON color fallback triggered: $reason, " +
+                "matchedTokens=${result.matchedTokenCount}, matchedKeys=${result.matchedKeyCount}, " +
+                "appliedKeys=${result.appliedKeyCount}, elapsedMs=${"%.2f".format(result.elapsedMs)}"
+        )
+    }
+
+    private fun logSlowIfNeeded(result: EnhanceResult) {
+        if (!LOG.isDebugEnabled) return
+        if (result.elapsedMs > SLOW_APPLY_THRESHOLD_MS) {
+            LOG.debug(
+                "JSON color enhance is slow: elapsedMs=${"%.2f".format(result.elapsedMs)}, " +
+                    "matchedTokens=${result.matchedTokenCount}, matchedKeys=${result.matchedKeyCount}, " +
+                    "appliedKeys=${result.appliedKeyCount}"
+            )
         }
     }
 }

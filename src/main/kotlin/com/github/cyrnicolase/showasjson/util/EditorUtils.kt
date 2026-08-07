@@ -97,6 +97,7 @@ internal object EditorUtils {
             try {
                 val customScheme = EditorColorsManager.getInstance().globalScheme.clone() as EditorColorsScheme
                 customScheme.name = "JSON Viewer Custom Scheme"
+                // 配色仅在编辑器创建时应用。切换 IDE 主题后需重开 JSON 面板生效。
                 JsonColorSchemeUtils.enhanceJsonColors(customScheme)
                 editorEx.colorsScheme = customScheme
             } catch (e: Exception) {
