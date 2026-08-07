@@ -16,6 +16,8 @@ object JsonFoldingHelper {
 
     /** 最大折叠区域数量，防止性能问题 */
     private const val MAX_FOLD_REGIONS = 1000
+    /** 自动折叠的最大文本长度（超过则跳过自动折叠计算） */
+    private const val MAX_AUTO_FOLD_TEXT_LENGTH = 1_000_000
     /** 折叠任务序列号，用于丢弃过期异步任务 */
     private val foldingTaskSequence = AtomicLong(0)
 
@@ -45,6 +47,17 @@ object JsonFoldingHelper {
      */
     fun setupFolding(editor: Editor, jsonText: String) {
         if (!EditorUtils.isEditorValid(editor)) return
+        if (jsonText.length > MAX_AUTO_FOLD_TEXT_LENGTH) {
+            ApplicationManager.getApplication().invokeLater {
+                if (!EditorUtils.isEditorValid(editor)) return@invokeLater
+                runCatching {
+                    editor.foldingModel.runBatchFoldingOperation {
+                        editor.foldingModel.allFoldRegions.forEach { editor.foldingModel.removeFoldRegion(it) }
+                    }
+                }
+            }
+            return
+        }
         val taskId = foldingTaskSequence.incrementAndGet()
 
         // 折叠区域解析放到后台线程，避免阻塞 EDT。

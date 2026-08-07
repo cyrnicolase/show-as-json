@@ -1,7 +1,7 @@
 package com.github.cyrnicolase.showasjson.util
 
 import com.intellij.openapi.application.ApplicationManager
-import com.intellij.openapi.command.WriteCommandAction
+import com.intellij.openapi.application.WriteAction
 import com.intellij.openapi.editor.Document
 import com.intellij.openapi.editor.Editor
 import com.intellij.openapi.editor.EditorFactory
@@ -51,6 +51,8 @@ object JsonEditorDialog {
 
     /** 内容更新序列，避免异步任务乱序覆盖 */
     private val contentUpdateSequence = AtomicLong(0)
+    /** 格式化任务序列，避免重格式化任务乱序覆盖 */
+    private val formatTaskSequence = AtomicLong(0)
 
     private fun formatByCurrentMode(content: String): String {
         return if (isPrettyFormat) {
@@ -93,9 +95,6 @@ object JsonEditorDialog {
         val trimmedContent = jsonContent.trim()
         originalJsonContent = trimmedContent
         
-        // 根据当前格式选择格式化方法
-        val formattedJson = formatByCurrentMode(trimmedContent)
-
         synchronized(lock) {
             // 再次检查项目是否已关闭（可能在等待锁时项目被关闭）
             if (project.isDisposed) {
@@ -107,7 +106,7 @@ object JsonEditorDialog {
 
             // 如果对话框存在且可见，更新内容
             if (dialog != null && dialog.isVisible && editor != null && EditorUtils.isEditorValid(editor)) {
-                updateContent(project, formattedJson, sourceFont, editor)
+                requestFormattedUpdate(project, trimmedContent, sourceFont, editor)
                 // 确保对话框显示在最前面
                 try {
                     dialog.toFront()
@@ -128,6 +127,7 @@ object JsonEditorDialog {
             }
 
             // 创建新对话框
+            val formattedJson = formatByCurrentMode(trimmedContent)
             createDialog(project, formattedJson, sourceFont)
         }
     }
@@ -159,8 +159,7 @@ object JsonEditorDialog {
                     // 格式切换回调
                     isPrettyFormat = isPretty
                     originalJsonContent?.let { original ->
-                        val newFormatted = formatByCurrentMode(original)
-                        updateContent(project, newFormatted, sourceFont, editor)
+                        requestFormattedUpdate(project, original, sourceFont, editor)
                     }
                 },
                 onExpandAll = {
@@ -207,9 +206,7 @@ object JsonEditorDialog {
                         val trimmed = cellValue.trim()
                         originalJsonContent = trimmed
 
-                        // 根据当前格式偏好格式化
-                        val formatted = formatByCurrentMode(trimmed)
-                        updateContent(project, formatted, font, ed)
+                        requestFormattedUpdate(project, trimmed, font, ed)
                     }
                 }
             }.apply { 
@@ -224,6 +221,29 @@ object JsonEditorDialog {
             stopCellMonitor()
             dialog.dispose()
             Messages.showErrorDialog(project, "创建 JSON 编辑器失败：${e.message}", "Show as JSON")
+        }
+    }
+
+    private fun requestFormattedUpdate(project: Project, rawContent: String, sourceFont: Font?, editor: Editor) {
+        if (!EditorUtils.isEditorValid(editor) || project.isDisposed) {
+            return
+        }
+
+        val taskId = formatTaskSequence.incrementAndGet()
+        ApplicationManager.getApplication().executeOnPooledThread {
+            val formatted = formatByCurrentMode(rawContent)
+            ApplicationManager.getApplication().invokeLater {
+                if (taskId != formatTaskSequence.get()) {
+                    return@invokeLater
+                }
+                if (project.isDisposed || !EditorUtils.isEditorValid(editor)) {
+                    return@invokeLater
+                }
+                if (editor !== editorInstance) {
+                    return@invokeLater
+                }
+                updateContent(project, formatted, sourceFont, editor)
+            }
         }
     }
 
@@ -329,7 +349,7 @@ object JsonEditorDialog {
             }
 
             try {
-                WriteCommandAction.writeCommandAction(project).run<Throwable> {
+                WriteAction.run<Throwable> {
                     if (document.text != formattedJson) {
                         document.setText(formattedJson)
                         PsiDocumentManager.getInstance(project).commitDocument(document)

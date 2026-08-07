@@ -8,6 +8,8 @@ import javax.swing.event.ListSelectionEvent
 import javax.swing.event.ListSelectionListener
 import java.awt.Font
 import java.util.Timer
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 import kotlin.concurrent.timer
 
 /**
@@ -35,6 +37,8 @@ class CellSelectionMonitor(
     /** 表格选择监听器（事件模式） */
     @Volatile
     private var tableListener: ListSelectionListener? = null
+    @Volatile
+    private var columnListener: ListSelectionListener? = null
 
     /** 当前监听的表格实例 */
     @Volatile
@@ -53,7 +57,24 @@ class CellSelectionMonitor(
 
     /** 防抖间隔（毫秒） - 事件模式下的防抖 */
     private val debounceInterval = 50L
-    
+
+    /** 避免并发触发多个异步 DataContext 检查 */
+    private val checkInProgress = AtomicBoolean(false)
+    @Volatile
+    private var checkStartedAtMs = 0L
+    private val checkRequestSequence = AtomicLong(0)
+    @Volatile
+    private var activeCheckRequestId = -1L
+    private val pollCheckCounter = AtomicLong(0)
+
+    /** 异步检查超时兜底，防止门闩卡死 */
+    private val checkTimeoutMs = 3000L
+
+    /** 轮询自适应间隔（毫秒） */
+    @Volatile
+    private var adaptivePollingIntervalMs = pollingInterval
+    private val maxPollingIntervalMs = 600L
+
     /** JSON 面板编辑器引用，用于避免从面板中提取选中的文本 */
     @Volatile
     private var jsonPanelEditor: com.intellij.openapi.editor.Editor? = null
@@ -99,6 +120,11 @@ class CellSelectionMonitor(
         monitoredTable = null
         lastCheckTime = 0L
         jsonPanelEditor = null
+        checkInProgress.set(false)
+        checkStartedAtMs = 0L
+        activeCheckRequestId = -1L
+        pollCheckCounter.set(0L)
+        adaptivePollingIntervalMs = pollingInterval
     }
 
     /**
@@ -151,23 +177,16 @@ class CellSelectionMonitor(
         stopPollingTimer()
 
         // 创建新的监听器
-        val listener = object : ListSelectionListener {
-            override fun valueChanged(e: ListSelectionEvent?) {
-                // 避免重复触发
-                if (e?.valueIsAdjusting == true || !isRunning || project.isDisposed) {
-                    return
-                }
+        val rowSelectionListener = createSelectionListener()
+        val colSelectionListener = createSelectionListener()
 
-                // 检查单元格变化（事件模式，无需防抖）
-                checkCellChangeImmediate()
-            }
-        }
-
-        // 添加监听器到表格
+        // 添加监听器到表格（行 + 列）
         try {
-            table.selectionModel.addListSelectionListener(listener)
+            table.selectionModel.addListSelectionListener(rowSelectionListener)
+            table.columnModel.selectionModel.addListSelectionListener(colSelectionListener)
             monitoredTable = table
-            tableListener = listener
+            tableListener = rowSelectionListener
+            columnListener = colSelectionListener
 
             // 立即检查一次当前选择
             checkCellChangeImmediate()
@@ -179,16 +198,27 @@ class CellSelectionMonitor(
         }
     }
 
+    private fun createSelectionListener(): ListSelectionListener {
+        return ListSelectionListener { e: ListSelectionEvent? ->
+            if (e?.valueIsAdjusting == true || !isRunning || project.isDisposed) {
+                return@ListSelectionListener
+            }
+            checkCellChangeImmediate()
+        }
+    }
+
     /**
      * 移除表格监听器
      */
     private fun removeTableListener() {
         val table = monitoredTable
-        val listener = tableListener
+        val rowListener = tableListener
+        val colListener = columnListener
 
-        if (table != null && listener != null) {
+        if (table != null) {
             try {
-                table.selectionModel.removeListSelectionListener(listener)
+                rowListener?.let { table.selectionModel.removeListSelectionListener(it) }
+                colListener?.let { table.columnModel.selectionModel.removeListSelectionListener(it) }
             } catch (e: Exception) {
                 // 忽略移除错误
             }
@@ -196,6 +226,7 @@ class CellSelectionMonitor(
 
         monitoredTable = null
         tableListener = null
+        columnListener = null
     }
 
     /**
@@ -250,7 +281,8 @@ class CellSelectionMonitor(
 
         // 防抖：如果距离上次检查时间太短，跳过
         val currentTime = System.currentTimeMillis()
-        if (currentTime - lastCheckTime < debounceInterval) {
+        val minInterval = maxOf(debounceInterval, adaptivePollingIntervalMs)
+        if (currentTime - lastCheckTime < minInterval) {
             return
         }
         lastCheckTime = currentTime
@@ -273,51 +305,111 @@ class CellSelectionMonitor(
      * 执行实际的单元格内容检查
      */
     private fun performCheck() {
+        val now = System.currentTimeMillis()
+        if (checkInProgress.get()) {
+            if (now - checkStartedAtMs > checkTimeoutMs) {
+                forceResetCheckState()
+            } else {
+                return
+            }
+        }
+        if (!checkInProgress.compareAndSet(false, true)) {
+            return
+        }
+        val requestId = checkRequestSequence.incrementAndGet()
+        activeCheckRequestId = requestId
+        checkStartedAtMs = now
+
         try {
             // 异步获取 DataContext
-            DataManager.getInstance().dataContextFromFocusAsync.onSuccess { dataContext ->
-                if (!isRunning || project.isDisposed) {
-                    return@onSuccess
-                }
+            DataManager.getInstance().dataContextFromFocusAsync
+                .onSuccess { dataContext ->
+                    try {
+                        if (requestId != activeCheckRequestId) {
+                            return@onSuccess
+                        }
+                        if (!isRunning || project.isDisposed) {
+                            return@onSuccess
+                        }
 
-                // 检查焦点是否在 JSON 面板编辑器上
-                // 如果是，则忽略此次检查，避免面板内的文本选择触发更新
-                val currentEditor = com.intellij.openapi.actionSystem.CommonDataKeys.EDITOR.getData(dataContext)
-                if (currentEditor != null && currentEditor == jsonPanelEditor) {
-                    return@onSuccess
-                }
+                        // 检查焦点是否在 JSON 面板编辑器上
+                        // 如果是，则忽略此次检查，避免面板内的文本选择触发更新
+                        val currentEditor = com.intellij.openapi.actionSystem.CommonDataKeys.EDITOR.getData(dataContext)
+                        if (currentEditor != null && currentEditor == jsonPanelEditor) {
+                            return@onSuccess
+                        }
 
-                // 提取单元格值和字体
-                val cellValue = CellValueExtractor.extractCellValue(dataContext)
-                val tableFont = CellValueExtractor.extractTableFont(dataContext)
+                        // 提取单元格值和字体（监控路径禁用动态兜底，降低高频轮询开销）
+                        val table = CellValueExtractor.extractTable(dataContext)
+                        val checkCount = pollCheckCounter.incrementAndGet()
+                        val allowDynamicLookup = shouldUseDynamicLookup(table, checkCount)
+                        val cellValue = CellValueExtractor.extractCellValue(dataContext, allowDynamicLookup = allowDynamicLookup)
+                        val tableFont = table?.font ?: CellValueExtractor.extractTableFont(dataContext)
+                        updatePollingCadence(table != null, cellValue != null)
 
-                // 如果在轮询模式下且成功获取到表格，尝试切换到事件模式
-                if (monitoredTable == null && tableListener == null) {
-                    val table = CellValueExtractor.extractTable(dataContext)
-                    if (table != null) {
-                        setupTableListener(table)
-                    }
-                }
-
-                // 检查是否有变化
-                if (cellValue != null && cellValue != currentCellValue) {
-                    // 内容变化，更新记录
-                    currentCellValue = cellValue
-
-                    // 在 EDT 中触发回调
-                    ApplicationManager.getApplication().invokeLater {
-                        if (isRunning && !project.isDisposed) {
-                            try {
-                                onCellChanged(cellValue, tableFont)
-                            } catch (e: Exception) {
-                                // 回调执行失败，忽略
+                        // 如果在轮询模式下且成功获取到表格，尝试切换到事件模式
+                        if (monitoredTable == null && tableListener == null) {
+                            if (table != null) {
+                                setupTableListener(table)
                             }
                         }
+
+                        // 检查是否有变化
+                        if (cellValue != null && cellValue != currentCellValue) {
+                            // 内容变化，更新记录
+                            currentCellValue = cellValue
+
+                            // 在 EDT 中触发回调
+                            ApplicationManager.getApplication().invokeLater {
+                                if (isRunning && !project.isDisposed) {
+                                    try {
+                                        onCellChanged(cellValue, tableFont)
+                                    } catch (e: Exception) {
+                                        // 回调执行失败，忽略
+                                    }
+                                }
+                            }
+                        }
+                    } finally {
+                        completeCheck(requestId)
                     }
                 }
-            }
+                .onError {
+                    completeCheck(requestId)
+                }
         } catch (e: Exception) {
             // 检查失败，忽略此次检查
+            completeCheck(requestId)
         }
+    }
+
+    private fun updatePollingCadence(hasTable: Boolean, hasCellValue: Boolean) {
+        if (hasTable || hasCellValue) {
+            adaptivePollingIntervalMs = pollingInterval
+            return
+        }
+        adaptivePollingIntervalMs = minOf(adaptivePollingIntervalMs + 80L, maxPollingIntervalMs)
+    }
+
+    private fun forceResetCheckState() {
+        checkInProgress.set(false)
+        checkStartedAtMs = 0L
+        activeCheckRequestId = -1L
+    }
+
+    private fun completeCheck(requestId: Long) {
+        if (activeCheckRequestId == requestId) {
+            checkInProgress.set(false)
+            checkStartedAtMs = 0L
+            activeCheckRequestId = -1L
+        }
+    }
+
+    private fun shouldUseDynamicLookup(table: JTable?, checkCount: Long): Boolean {
+        if (table != null || tableListener != null) {
+            return false
+        }
+        // 大多数检查走轻量路径；周期性开启一次动态查找，兼容非常规 DataContext 场景。
+        return checkCount % 10L == 0L
     }
 }

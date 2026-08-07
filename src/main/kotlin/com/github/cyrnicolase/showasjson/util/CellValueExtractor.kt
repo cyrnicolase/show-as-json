@@ -16,6 +16,20 @@ import java.util.ArrayDeque
  * @author cyrnicolase
  */
 object CellValueExtractor {
+    private val possibleResultViewerClasses = listOf(
+        "com.intellij.database.view.DbResultViewPanel",
+        "com.intellij.database.view.resultset.ResultSetViewer",
+        "com.intellij.database.view.resultset.ResultSetViewerImpl",
+        "com.intellij.database.view.resultset.ResultSetTable",
+        "com.intellij.database.view.resultset.ResultSetTableModel",
+        "com.intellij.database.view.resultset.ResultSetPanel"
+    )
+
+    private val cachedResultViewerDataKeys: List<com.intellij.openapi.actionSystem.DataKey<*>> by lazy {
+        possibleResultViewerClasses.mapNotNull { className ->
+            runCatching { Class.forName(className) }.getOrNull()?.let { getDataKey(it) }
+        }
+    }
     /**
      * 从 DataContext 中提取选中的单元格值
      *
@@ -29,9 +43,9 @@ object CellValueExtractor {
      * @param dataContext DataGrip 的 DataContext
      * @return 单元格值，如果无法获取则返回 null
      */
-    fun extractCellValue(dataContext: DataContext): String? {
+    fun extractCellValue(dataContext: DataContext, allowDynamicLookup: Boolean = true): String? {
         // 方法1: 尝试从查询结果查看器获取
-        extractFromResultViewer(dataContext)?.let { return it }
+        extractFromResultViewer(dataContext, allowDynamicLookup)?.let { return it }
 
         // 方法2: 尝试从表格组件获取
         extractFromTable(dataContext)?.let { return it }
@@ -49,9 +63,7 @@ object CellValueExtractor {
      */
     fun extractTableFont(dataContext: DataContext): java.awt.Font? {
         return try {
-            val component = PlatformDataKeys.CONTEXT_COMPONENT.getData(dataContext) ?: return null
-            val table = findTableComponent(component) ?: return null
-            table.font
+            extractContextTable(dataContext)?.font
         } catch (e: Exception) {
             null
         }
@@ -67,8 +79,7 @@ object CellValueExtractor {
      */
     fun extractTable(dataContext: DataContext): JTable? {
         return try {
-            val component = PlatformDataKeys.CONTEXT_COMPONENT.getData(dataContext) ?: return null
-            findTableComponent(component)
+            extractContextTable(dataContext)
         } catch (e: Exception) {
             null
         }
@@ -83,28 +94,18 @@ object CellValueExtractor {
      * @param dataContext DataContext
      * @return 单元格值，如果无法获取返回 null
      */
-    private fun extractFromResultViewer(dataContext: DataContext): String? {
-        val possibleClasses = listOf(
-            "com.intellij.database.view.DbResultViewPanel",
-            "com.intellij.database.view.resultset.ResultSetViewer",
-            "com.intellij.database.view.resultset.ResultSetViewerImpl",
-            "com.intellij.database.view.resultset.ResultSetTable",
-            "com.intellij.database.view.resultset.ResultSetTableModel",
-            "com.intellij.database.view.resultset.ResultSetPanel"
-        )
-
-        for (className in possibleClasses) {
-            @Suppress("UNCHECKED_CAST")
+    private fun extractFromResultViewer(dataContext: DataContext, allowDynamicLookup: Boolean): String? {
+        for (dataKey in cachedResultViewerDataKeys) {
             try {
-                val clazz = Class.forName(className)
-                val dataKey = getDataKey(clazz) ?: continue
                 val viewer = dataContext.getData(dataKey) ?: continue
                 return extractValueFromViewer(viewer)
-            } catch (e: ClassNotFoundException) {
-                // 继续尝试下一个类
             } catch (e: Exception) {
                 // 继续尝试下一个类
             }
+        }
+
+        if (!allowDynamicLookup) {
+            return null
         }
 
         // 尝试通过 getDataKeys() 动态查找
@@ -144,12 +145,16 @@ object CellValueExtractor {
      */
     private fun extractFromTable(dataContext: DataContext): String? {
         return try {
-            val component = PlatformDataKeys.CONTEXT_COMPONENT.getData(dataContext) ?: return null
-            val table = findTableComponent(component) ?: return null
+            val table = extractContextTable(dataContext) ?: return null
             getSelectedCellValue(table)
         } catch (e: Exception) {
             null
         }
+    }
+
+    private fun extractContextTable(dataContext: DataContext): JTable? {
+        val component = PlatformDataKeys.CONTEXT_COMPONENT.getData(dataContext) ?: return null
+        return findTableComponent(component)
     }
 
     /**

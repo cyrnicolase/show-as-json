@@ -10,6 +10,8 @@ import com.intellij.openapi.editor.markup.HighlighterTargetArea
 import com.intellij.openapi.editor.markup.RangeHighlighter
 import com.intellij.openapi.editor.markup.TextAttributes
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.util.Disposer
 import com.intellij.openapi.wm.WindowManager
 import com.intellij.ui.JBColor
 import com.intellij.util.ui.JBUI
@@ -32,6 +34,7 @@ import javax.swing.JTextField
 import javax.swing.KeyStroke
 import javax.swing.SwingUtilities
 import javax.swing.WindowConstants
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * 对话框工具类
@@ -183,7 +186,10 @@ internal object DialogUtils {
         val highlighters = mutableListOf<RangeHighlighter>()
         var currentMatchIndex = -1
         var matches = emptyList<Int>()
+        var totalMatchCount = 0
         var currentSearchTextLength = 0
+        val maxHighlightMatches = 2000
+        val searchTaskSequence = AtomicLong(0)
 
         fun clearHighlighters() {
             if (!EditorUtils.isEditorValid(editor)) return
@@ -197,6 +203,7 @@ internal object DialogUtils {
             }
             clearHighlighters()
             matches = emptyList()
+            totalMatchCount = 0
             currentMatchIndex = -1
             currentSearchTextLength = 0
             prevButton.isEnabled = false
@@ -223,6 +230,27 @@ internal object DialogUtils {
             }
         }
 
+        fun buildMatchLabel(currentIndex: Int, total: Int): String {
+            return if (total > maxHighlightMatches) {
+                "匹配: $currentIndex/$total（仅导航前${maxHighlightMatches}条）"
+            } else {
+                "匹配: $currentIndex/$total"
+            }
+        }
+
+        fun indexOfIgnoreCase(text: String, pattern: String, fromIndex: Int): Int {
+            if (pattern.isEmpty()) return -1
+            val maxStart = text.length - pattern.length
+            var i = fromIndex.coerceAtLeast(0)
+            while (i <= maxStart) {
+                if (text.regionMatches(i, pattern, 0, pattern.length, ignoreCase = true)) {
+                    return i
+                }
+                i++
+            }
+            return -1
+        }
+
         fun performSearch() {
             if (!EditorUtils.isEditorValid(editor)) return
             val searchText = searchField.text.trim()
@@ -232,49 +260,65 @@ internal object DialogUtils {
             }
 
             currentSearchTextLength = searchText.length
-            clearHighlighters()
-
             val text = editor.document.text
             val isCaseSensitive = caseSensitiveCheckBox.isSelected
-            val targetSearchText = if (isCaseSensitive) searchText else searchText.lowercase()
-            val targetText = if (isCaseSensitive) text else text.lowercase()
+            val sequenceId = searchTaskSequence.incrementAndGet()
 
-            matches = buildList {
+            ApplicationManager.getApplication().executeOnPooledThread {
+                val matchedOffsets = mutableListOf<Int>()
+                var totalMatches = 0
                 var idx = 0
                 while (true) {
-                    idx = targetText.indexOf(targetSearchText, idx)
+                    idx = if (isCaseSensitive) {
+                        text.indexOf(searchText, idx)
+                    } else {
+                        indexOfIgnoreCase(text, searchText, idx)
+                    }
                     if (idx == -1) break
-                    add(idx)
+                    totalMatches++
+                    if (matchedOffsets.size < maxHighlightMatches) {
+                        matchedOffsets.add(idx)
+                    }
                     idx += searchText.length
                 }
-            }
 
-            val attrs = TextAttributes().apply { backgroundColor = JBColor.YELLOW }
-            matches.forEach { offset ->
-                runCatching {
-                    highlighters.add(
-                        editor.markupModel.addRangeHighlighter(
-                            offset, offset + searchText.length,
-                            HighlighterLayer.SELECTION - 1, attrs,
-                            HighlighterTargetArea.EXACT_RANGE
-                        )
-                    )
+                ApplicationManager.getApplication().invokeLater {
+                    if (!EditorUtils.isEditorValid(editor)) return@invokeLater
+                    if (!dialog.isVisible) return@invokeLater
+                    if (sequenceId != searchTaskSequence.get()) return@invokeLater
+                    if (searchField.text.trim() != searchText) return@invokeLater
+
+                    clearHighlighters()
+                    matches = matchedOffsets
+                    totalMatchCount = totalMatches
+                    val attrs = TextAttributes().apply { backgroundColor = JBColor.YELLOW }
+                    matches.forEach { offset ->
+                        runCatching {
+                            highlighters.add(
+                                editor.markupModel.addRangeHighlighter(
+                                    offset, offset + searchText.length,
+                                    HighlighterLayer.SELECTION - 1, attrs,
+                                    HighlighterTargetArea.EXACT_RANGE
+                                )
+                            )
+                        }
+                    }
+
+                    if (matches.isNotEmpty()) {
+                        currentMatchIndex = 0
+                        scrollToMatch(matches[0])
+                        prevButton.isEnabled = true
+                        nextButton.isEnabled = true
+                        matchLabel.text = buildMatchLabel(currentMatchIndex + 1, totalMatchCount)
+                        matchLabel.foreground = JBColor.foreground()
+                    } else {
+                        currentMatchIndex = -1
+                        prevButton.isEnabled = false
+                        nextButton.isEnabled = false
+                        matchLabel.text = "未找到匹配（0/0）"
+                        matchLabel.foreground = JBColor.GRAY
+                    }
                 }
-            }
-
-            if (matches.isNotEmpty()) {
-                currentMatchIndex = 0
-                scrollToMatch(matches[0])
-                prevButton.isEnabled = true
-                nextButton.isEnabled = true
-                matchLabel.text = "匹配: 1/${matches.size}"
-                matchLabel.foreground = JBColor.foreground()
-            } else {
-                currentMatchIndex = -1
-                prevButton.isEnabled = false
-                nextButton.isEnabled = false
-                matchLabel.text = "未找到匹配（0/0）"
-                matchLabel.foreground = JBColor.GRAY
             }
         }
 
@@ -282,7 +326,7 @@ internal object DialogUtils {
             if (!EditorUtils.isEditorValid(editor) || matches.isEmpty() || currentMatchIndex < 0) return
             currentMatchIndex = if (currentMatchIndex > 0) currentMatchIndex - 1 else matches.size - 1
             scrollToMatch(matches[currentMatchIndex])
-            matchLabel.text = "匹配: ${currentMatchIndex + 1}/${matches.size}"
+            matchLabel.text = buildMatchLabel(currentMatchIndex + 1, totalMatchCount)
             matchLabel.foreground = JBColor.foreground()
         }
 
@@ -290,7 +334,7 @@ internal object DialogUtils {
             if (!EditorUtils.isEditorValid(editor) || matches.isEmpty() || currentMatchIndex < 0) return
             currentMatchIndex = if (currentMatchIndex < matches.size - 1) currentMatchIndex + 1 else 0
             scrollToMatch(matches[currentMatchIndex])
-            matchLabel.text = "匹配: ${currentMatchIndex + 1}/${matches.size}"
+            matchLabel.text = buildMatchLabel(currentMatchIndex + 1, totalMatchCount)
             matchLabel.foreground = JBColor.foreground()
         }
 
@@ -303,6 +347,13 @@ internal object DialogUtils {
             add(nextButton)
             add(matchLabel)
         }
+        val searchDebounceTimer = javax.swing.Timer(120) { performSearch() }.apply {
+            isRepeats = false
+        }
+        fun scheduleSearch() {
+            if (!toolbarPanel.isVisible || !dialog.isVisible || !EditorUtils.isEditorValid(editor)) return
+            searchDebounceTimer.restart()
+        }
 
         // 编辑器内容变更时，若搜索栏可见则基于新内容实时重算匹配，避免使用旧偏移定位。
         val documentListener = object : DocumentListener {
@@ -310,7 +361,7 @@ internal object DialogUtils {
                 if (!toolbarPanel.isVisible) return
                 SwingUtilities.invokeLater {
                     if (!dialog.isVisible || !EditorUtils.isEditorValid(editor)) return@invokeLater
-                    performSearch()
+                    scheduleSearch()
                 }
             }
         }
@@ -334,13 +385,13 @@ internal object DialogUtils {
                 toolbarPanel.isVisible = true
                 if (shouldPrefill) {
                     searchField.text = selectedText
-                    performSearch()
+                    scheduleSearch()
                 } else {
                     resetSearchState(clearText = false)
                 }
             } else if (shouldPrefill && searchField.text != selectedText) {
                 searchField.text = selectedText
-                performSearch()
+                scheduleSearch()
             }
 
             searchField.requestFocus()
@@ -350,9 +401,9 @@ internal object DialogUtils {
         }
 
         searchField.addKeyListener(object : KeyAdapter() {
-            override fun keyReleased(e: KeyEvent?) = performSearch()
+            override fun keyReleased(e: KeyEvent?) = scheduleSearch()
         })
-        caseSensitiveCheckBox.addActionListener { performSearch() }
+        caseSensitiveCheckBox.addActionListener { scheduleSearch() }
         prevButton.addActionListener { navigateToPrevious() }
         nextButton.addActionListener { navigateToNext() }
 
@@ -409,13 +460,19 @@ internal object DialogUtils {
             }
             false
         }
-        com.intellij.ide.IdeEventQueue.getInstance().addDispatcher(ideEventDispatcher, null)
+        val dispatcherDisposable = Disposer.newDisposable("ShowAsJsonSearchDispatcher")
+        com.intellij.ide.IdeEventQueue.getInstance().addDispatcher(ideEventDispatcher, dispatcherDisposable)
 
         // 对话框关闭时清理资源
         dialog.addWindowListener(object : WindowAdapter() {
+            override fun windowClosing(e: WindowEvent?) {
+                runCatching { searchDebounceTimer.stop() }
+            }
+
             override fun windowClosed(e: WindowEvent?) {
                 runCatching {
-                    com.intellij.ide.IdeEventQueue.getInstance().removeDispatcher(ideEventDispatcher)
+                    searchDebounceTimer.stop()
+                    Disposer.dispose(dispatcherDisposable)
                     editor.document.removeDocumentListener(documentListener)
                     clearHighlighters()
                 }
