@@ -350,19 +350,23 @@ object JsonEditorDialog {
             }
 
             try {
+                var textChanged = false
                 WriteAction.run<Throwable> {
                     if (document.text != formattedJson) {
                         document.setText(formattedJson)
                         PsiDocumentManager.getInstance(project).commitDocument(document)
+                        textChanged = true
                     }
                 }
 
                 if (EditorUtils.isEditorValid(editor)) {
                     sourceFont?.let { EditorUtils.applyFont(editor, it) }
-                    
-                    // 重新设置折叠功能
-                    JsonFoldingHelper.setupFolding(editor, formattedJson)
-                    JsonPropertyKeyHighlighter.apply(editor, formattedJson)
+
+                    if (textChanged) {
+                        // 仅内容变化时重建折叠和 key 高亮，避免无效重算。
+                        JsonFoldingHelper.setupFolding(editor, formattedJson)
+                        JsonPropertyKeyHighlighter.apply(editor, formattedJson)
+                    }
                 }
             } catch (e: Exception) {
                 // 如果更新失败（例如项目已关闭），忽略错误

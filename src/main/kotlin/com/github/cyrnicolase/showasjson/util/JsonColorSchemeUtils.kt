@@ -14,7 +14,7 @@ import kotlin.math.roundToInt
  * JSON 配色方案增强工具类（单核心流水线）
  *
  * 设计目标：
- * 1) 主题跟随优先：从当前主题色出发进行轻量偏移，而不是硬编码固定配色。
+ * 1) 使用 IsLands Dark 语义色配置，确保 JSON 信息层次稳定可读。
  * 2) 命中可观测：统计 token/key 命中数量，避免“设置成功但实际未生效”的静默问题。
  * 3) 二档回退：不满足必选语义命中时全回退，满足时正常应用。
  * 4) 样式完整：仅增量覆盖前景色，避免覆盖已有背景/效果线等样式。
@@ -28,6 +28,14 @@ object JsonColorSchemeUtils {
     private const val MIN_KEY_STRING_LUMA_DIFF = 22
     private const val MIN_STRING_NUMBER_LUMA_DIFF = 18
     private const val MIN_BG_LUMA_DIFF = 70
+    // IsLands Dark palette
+    private val COLOR_KEY = Color(199, 125, 187)          // #C77DBB (properties)
+    private val COLOR_STRING = Color(106, 171, 115)       // #6AAB73
+    private val COLOR_NUMBER = Color(42, 172, 184)        // #2AACB8
+    private val COLOR_KEYWORD = Color(207, 142, 109)      // #CF8E6D (boolean/null)
+    private val COLOR_BRACKETS = Color(188, 190, 196)     // #BCBEC4
+    private val COLOR_PUNCTUATION = Color(188, 190, 196)  // #BCBEC4
+    private val COLOR_FOLDING = Color(122, 126, 133)      // #7A7E85
 
     private enum class JsonSemanticToken(val keyNames: List<String>) {
         PROPERTY_KEY(
@@ -115,11 +123,10 @@ object JsonColorSchemeUtils {
      * 增强 JSON 配色方案
      *
      * 必选语义命中条件：
-     * - PROPERTY_KEY >= 1
-     * - STRING >= 1
+     * - STRING >= 1 或 NUMBER >= 1 或 KEYWORD(BOOLEAN/NULL) >= 1
      *
      * 若不满足条件，则全回退（不写入任何 attributes），保证行为确定性。
-     * 注意：值类型（NUMBER/BOOLEAN/NULL）不作为强制门槛，避免跨版本 key 差异导致整体验证失败。
+     * 注意：PROPERTY_KEY 在部分链路可能与 STRING 共用 token，不作为强制门槛。
      *
      * key 解析策略：
      * - 使用 TextAttributesKey.find 解析 key
@@ -150,8 +157,9 @@ object JsonColorSchemeUtils {
                 return result
             }
 
-            val palette = buildPalette(scheme, resolvedKeys)
+            val palette = buildPalette(scheme)
             val appliedKeyCount = applyPalette(scheme, resolvedKeys, palette)
+            applyFoldingAccent(scheme)
             result = EnhanceResult(
                 matchedTokenCount = matchedTokenCount,
                 matchedKeyCount = matchedKeyCount,
@@ -205,60 +213,22 @@ object JsonColorSchemeUtils {
     private fun isMandatorySemanticMatched(
         resolvedKeys: Map<JsonSemanticToken, List<TextAttributesKey>>
     ): Boolean {
-        val keyMatched = resolvedKeys[JsonSemanticToken.PROPERTY_KEY].orEmpty().isNotEmpty()
         val stringMatched = resolvedKeys[JsonSemanticToken.STRING].orEmpty().isNotEmpty()
-        return keyMatched && stringMatched
+        val numericMatched = resolvedKeys[JsonSemanticToken.NUMBER].orEmpty().isNotEmpty()
+        val keywordMatched = resolvedKeys[JsonSemanticToken.BOOLEAN].orEmpty().isNotEmpty() ||
+            resolvedKeys[JsonSemanticToken.NULL].orEmpty().isNotEmpty()
+        return stringMatched || numericMatched || keywordMatched
     }
 
-    private fun buildPalette(
-        scheme: EditorColorsScheme,
-        resolvedKeys: Map<JsonSemanticToken, List<TextAttributesKey>>
-    ): Palette {
+    private fun buildPalette(scheme: EditorColorsScheme): Palette {
         val background = scheme.defaultBackground
-        val defaultForeground = scheme.defaultForeground
-        val isDark = ColorUtil.isDark(background)
 
-        val keyBase = resolveTokenColor(
-            scheme,
-            resolvedKeys[JsonSemanticToken.PROPERTY_KEY].orEmpty(),
-            if (isDark) Color(200, 140, 255) else Color(142, 53, 180)
-        )
-        val stringBase = resolveTokenColor(
-            scheme,
-            resolvedKeys[JsonSemanticToken.STRING].orEmpty(),
-            if (isDark) Color(136, 226, 114) else Color(20, 128, 52)
-        )
-        val numberBase = resolveTokenColor(
-            scheme,
-            resolvedKeys[JsonSemanticToken.NUMBER].orEmpty(),
-            if (isDark) Color(255, 188, 111) else Color(176, 98, 0)
-        )
-        val booleanBase = resolveTokenColor(
-            scheme,
-            resolvedKeys[JsonSemanticToken.BOOLEAN].orEmpty(),
-            if (isDark) Color(120, 210, 255) else Color(0, 116, 179)
-        )
-        val nullBase = resolveTokenColor(
-            scheme,
-            resolvedKeys[JsonSemanticToken.NULL].orEmpty(),
-            if (isDark) Color(255, 145, 199) else Color(176, 42, 125)
-        )
-        // 主题跟随 + 语义偏色：保留主题协调性的同时，让不同 token 的色相差异更可见。
-        val keyTinted = blendTowardAccent(keyBase, if (isDark) Color(200, 140, 255) else Color(142, 53, 180), 0.72)
-        val stringTinted = blendTowardAccent(stringBase, if (isDark) Color(136, 226, 114) else Color(20, 128, 52), 0.52)
-        val numberTinted = blendTowardAccent(numberBase, if (isDark) Color(255, 188, 111) else Color(176, 98, 0), 0.65)
-        val booleanTinted = blendTowardAccent(booleanBase, if (isDark) Color(120, 210, 255) else Color(0, 116, 179), 0.62)
-        val nullTinted = blendTowardAccent(nullBase, if (isDark) Color(255, 145, 199) else Color(176, 42, 125), 0.62)
-        val punctuationBase = mix(defaultForeground, background, 0.35)
-        val bracketBase = mix(defaultForeground, background, 0.42)
-
-        val keyWithBg = ensureBgContrast(keyTinted, background, MIN_BG_LUMA_DIFF)
-        val stringWithBg = ensureBgContrast(stringTinted, background, MIN_BG_LUMA_DIFF)
-        val numberWithBg = ensureBgContrast(numberTinted, background, MIN_BG_LUMA_DIFF)
-        val booleanWithBg = ensureBgContrast(booleanTinted, background, MIN_BG_LUMA_DIFF)
-        val nullWithBg = ensureBgContrast(nullTinted, background, MIN_BG_LUMA_DIFF)
-        val punctuationWithBg = ensureBgContrast(punctuationBase, background, MIN_BG_LUMA_DIFF - 20)
-        val bracketWithBg = ensureBgContrast(bracketBase, background, MIN_BG_LUMA_DIFF - 20)
+        val keyWithBg = ensureBgContrast(COLOR_KEY, background, MIN_BG_LUMA_DIFF)
+        val stringWithBg = ensureBgContrast(COLOR_STRING, background, MIN_BG_LUMA_DIFF)
+        val numberWithBg = ensureBgContrast(COLOR_NUMBER, background, MIN_BG_LUMA_DIFF)
+        val keywordWithBg = ensureBgContrast(COLOR_KEYWORD, background, MIN_BG_LUMA_DIFF)
+        val punctuationWithBg = ensureBgContrast(COLOR_PUNCTUATION, background, MIN_BG_LUMA_DIFF - 20)
+        val bracketWithBg = ensureBgContrast(COLOR_BRACKETS, background, MIN_BG_LUMA_DIFF - 20)
 
         val adjustedKey = ensureTokenLumaDistance(
             keyWithBg,
@@ -277,23 +247,11 @@ object JsonColorSchemeUtils {
             key = adjustedKey,
             string = stringWithBg,
             number = adjustedNumber,
-            boolean = booleanWithBg,
-            nullValue = nullWithBg,
+            boolean = keywordWithBg,
+            nullValue = keywordWithBg,
             brackets = bracketWithBg,
             punctuation = punctuationWithBg
         )
-    }
-
-    private fun resolveTokenColor(
-        scheme: EditorColorsScheme,
-        keys: List<TextAttributesKey>,
-        fallback: Color
-    ): Color {
-        for (key in keys) {
-            val color = scheme.getAttributes(key)?.foregroundColor ?: key.defaultAttributes?.foregroundColor
-            if (color != null) return color
-        }
-        return fallback
     }
 
     private fun applyPalette(
@@ -364,26 +322,6 @@ object JsonColorSchemeUtils {
         return ensureBgContrast(candidate, background, MIN_BG_LUMA_DIFF)
     }
 
-    private fun mix(foreground: Color, background: Color, backgroundRatio: Double): Color {
-        val clamped = backgroundRatio.coerceIn(0.0, 1.0)
-        val fgRatio = 1.0 - clamped
-        return Color(
-            (foreground.red * fgRatio + background.red * clamped).roundToInt().coerceIn(0, 255),
-            (foreground.green * fgRatio + background.green * clamped).roundToInt().coerceIn(0, 255),
-            (foreground.blue * fgRatio + background.blue * clamped).roundToInt().coerceIn(0, 255)
-        )
-    }
-
-    private fun blendTowardAccent(base: Color, accent: Color, accentWeight: Double): Color {
-        val clamped = accentWeight.coerceIn(0.0, 1.0)
-        val baseWeight = 1.0 - clamped
-        return Color(
-            (base.red * baseWeight + accent.red * clamped).roundToInt().coerceIn(0, 255),
-            (base.green * baseWeight + accent.green * clamped).roundToInt().coerceIn(0, 255),
-            (base.blue * baseWeight + accent.blue * clamped).roundToInt().coerceIn(0, 255)
-        )
-    }
-
     private fun shiftTowards(color: Color, target: Color, ratio: Double): Color {
         val clamped = ratio.coerceIn(0.0, 1.0)
         return Color(
@@ -419,5 +357,13 @@ object JsonColorSchemeUtils {
                     "appliedKeys=${result.appliedKeyCount}"
             )
         }
+    }
+
+    private fun applyFoldingAccent(scheme: EditorColorsScheme) {
+        val foldedKey = TextAttributesKey.find("FOLDED_TEXT_ATTRIBUTES")
+        val current = scheme.getAttributes(foldedKey) ?: foldedKey.defaultAttributes ?: TextAttributes()
+        val updated = current.clone()
+        updated.foregroundColor = ensureBgContrast(COLOR_FOLDING, scheme.defaultBackground, MIN_BG_LUMA_DIFF - 20)
+        scheme.setAttributes(foldedKey, updated)
     }
 }

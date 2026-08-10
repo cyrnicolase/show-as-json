@@ -16,7 +16,7 @@ import java.awt.Font
  * 在当前 viewer 链路中，JSON 词法高亮通常将属性名和字符串值都映射为字符串 token，
  * 仅依赖配色 scheme 无法稳定区分 key 与 value。
  *
- * 该高亮器在不改动业务逻辑的前提下，额外对“紧跟冒号的字符串”施加前景色覆盖，
+ * 该高亮器在不改动业务逻辑的前提下，额外对“紧跟冒号的双引号字符串”施加前景色覆盖，
  * 从而稳定实现属性名颜色区分。
  */
 internal object JsonPropertyKeyHighlighter {
@@ -75,7 +75,6 @@ internal object JsonPropertyKeyHighlighter {
     private fun findPropertyKeyRanges(text: String): List<Pair<Int, Int>> {
         val ranges = mutableListOf<Pair<Int, Int>>()
         var inString = false
-        var quoteChar = '"'
         var escapeNext = false
         var stringStart = -1
 
@@ -93,7 +92,7 @@ internal object JsonPropertyKeyHighlighter {
                     i++
                     continue
                 }
-                if (ch == quoteChar) {
+                if (ch == '"') {
                     val endExclusive = i + 1
                     if (isPropertyKeyToken(text, endExclusive)) {
                         ranges.add(stringStart to endExclusive)
@@ -109,24 +108,10 @@ internal object JsonPropertyKeyHighlighter {
             }
 
             when {
-                ch == '"' || ch == '\'' -> {
+                ch == '"' -> {
                     inString = true
-                    quoteChar = ch
                     stringStart = i
                     i++
-                }
-                isIdentifierStart(ch) -> {
-                    val start = i
-                    i++
-                    while (i < text.length && isIdentifierPart(text[i])) {
-                        i++
-                    }
-                    if (isPropertyKeyToken(text, i)) {
-                        ranges.add(start to i)
-                        if (ranges.size >= MAX_HIGHLIGHT_REGIONS) {
-                            return ranges
-                        }
-                    }
                 }
                 else -> i++
             }
@@ -140,12 +125,5 @@ internal object JsonPropertyKeyHighlighter {
         return i < text.length && text[i] == ':'
     }
 
-    private fun isIdentifierStart(ch: Char): Boolean {
-        return ch == '_' || ch == '$' || ch.isLetter()
-    }
-
-    private fun isIdentifierPart(ch: Char): Boolean {
-        return isIdentifierStart(ch) || ch.isDigit()
-    }
 }
 
