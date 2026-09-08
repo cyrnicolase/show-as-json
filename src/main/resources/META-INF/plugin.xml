@@ -66,7 +66,8 @@
         <action id="ShowAsJsonAction"
                 class="com.github.cyrnicolase.showasjson.ShowAsJsonAction"
                 text="Show as JSON"
-                description="在 JSON 面板中以 JSON 格式打开选中的单元格内容">
+                description="在 JSON 面板中以 JSON 格式打开选中的单元格内容"
+                icon="/icons/showAsJson.svg">
             <!-- 注册键盘快捷键 -->
             <keyboard-shortcut keymap="$default" first-keystroke="F7"/>
             <keyboard-shortcut keymap="Mac OS X" first-keystroke="F7"/>
