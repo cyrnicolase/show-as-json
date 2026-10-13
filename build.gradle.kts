@@ -5,7 +5,7 @@ plugins {
 }
 
 group = "com.github.cyrnicolase"
-version = "1.0.18"
+version = "1.0.19"
 
 repositories {
     mavenCentral()
@@ -44,7 +44,7 @@ tasks {
 
     patchPluginXml {
         sinceBuild.set("233")
-        untilBuild.set("254.*")  // 支持 DataGrip 253 及更高版本
+        untilBuild.set("262.*")  // 支持 262 分支 IDE 构建版本
     }
 
     signPlugin {
